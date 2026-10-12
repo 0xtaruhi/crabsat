@@ -166,6 +166,9 @@ fn main() {
         SolveResult::Sat => {
             if check {
                 let model = &model[..original_vars];
+                if std::env::var_os("CRABSAT_DEBUG_MODEL").is_some() {
+                    debug_model(&solver, &original, model, 0);
+                }
                 for c in &original {
                     if !c.iter().any(|&l| model[l.unsigned_abs() as usize - 1] == l) {
                         die(&format!("model does not satisfy clause {c:?}"));
@@ -282,6 +285,8 @@ fn debug_model(s: &Solver, clauses: &[Vec<i32>], model: &[i32], id: usize) {
             continue;
         }
         eprintln!("solver {id}: violated {c:?} imported {}", s.stats.imported_units);
+        let target: Vec<crabsat::Lit> = c.iter().map(|&d| crabsat::Lit::from_dimacs(d)).collect();
+        s.debug_reconstruct(&target);
         for &d in c {
             let lit = crabsat::Lit::from_dimacs(d);
             let a = s.assigned[lit.vidx()];

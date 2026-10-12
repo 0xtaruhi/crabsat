@@ -210,6 +210,8 @@ pub struct Solver {
     pub shared: Option<std::sync::Arc<crate::share::Shared>>,
     pub exported: usize,
     pub imported: usize,
+    pub replay: Option<Vec<(u64, u64, Vec<Lit>)>>,
+    pub root_log: Option<Vec<Lit>>,
 }
 
 impl Solver {
@@ -280,6 +282,8 @@ impl Solver {
             shared: None,
             exported: 0,
             imported: 0,
+            replay: None,
+            root_log: std::env::var_os("CRABSAT_CHECK_DB").map(|_| Vec::new()),
         };
         s.last_learned = vec![INVALID_REF; s.opts.eagersubsume as usize];
         s.random = s.opts.seed;
@@ -344,6 +348,9 @@ impl Solver {
         debug_assert_eq!(self.values[lit.idx()], 0);
         let mut flags = if binary { BINARY } else { 0 };
         if level == 0 {
+            if self.root_log.is_some() {
+                self.root_log.as_mut().unwrap().push(lit);
+            }
             if reason != UNIT_REASON {
                 self.pending_units.push(lit);
                 reason = UNIT_REASON;
@@ -405,6 +412,9 @@ impl Solver {
     }
 
     pub fn flush_pending_units(&mut self) {
+        if let Some(log) = self.root_log.as_mut() {
+            log.extend_from_slice(&self.pending_units);
+        }
         if let Some(proof) = self.proof.as_mut() {
             for &lit in &self.pending_units {
                 proof.add(&[lit]);
@@ -491,6 +501,7 @@ impl Solver {
     }
 
     pub fn delete_binary(&mut self, a: Lit, b: Lit, proof: bool) {
+        self.trace("delete-binary", &[a, b]);
         self.mark_removed_var(a.vidx());
         self.mark_removed_var(b.vidx());
         self.stats.clauses_binary -= 1;
@@ -521,8 +532,28 @@ impl Solver {
         c
     }
 
+    /// Debugging: report events on clauses whose literals are a subset of
+    /// the clause given in `CRABSAT_TRACE` (comma separated DIMACS).
+    pub fn trace(&self, event: &str, lits: &[Lit]) {
+        static TARGET: std::sync::OnceLock<Option<Vec<i32>>> = std::sync::OnceLock::new();
+        let target = TARGET.get_or_init(|| {
+            std::env::var_os("CRABSAT_TRACE").map(|spec| {
+                spec.to_string_lossy().split(',').map(|x| x.trim().parse().unwrap()).collect()
+            })
+        });
+        let Some(target) = target else { return };
+        if lits.iter().all(|l| target.contains(&l.to_dimacs())) {
+            let d: Vec<i32> = lits.iter().map(|l| l.to_dimacs()).collect();
+            eprintln!(
+                "TRACE {event} {d:?} conflicts {} dense {} probing {} level {}",
+                self.stats.conflicts, self.dense, self.probing, self.level
+            );
+        }
+    }
+
     /// Mark a large clause as garbage (removed at the next collection).
     pub fn mark_garbage(&mut self, c: CRef) {
+        self.trace("garbage", self.arena.lits(c));
         debug_assert!(!self.arena.garbage(c));
         if let Some(p) = self.proof.as_mut() {
             p.delete(self.arena.lits(c));
@@ -653,9 +684,39 @@ impl Solver {
         None
     }
 
+    /// Debugging: replay model reconstruction and report the flips of
+    /// variables of `target` together with the witness clauses.
+    pub fn debug_reconstruct(&self, target: &[Lit]) {
+        let mut value: Vec<bool> = (0..self.vars).map(|v| self.values[2 * v] > 0).collect();
+        let ext = &self.extension;
+        let mut end = ext.len();
+        while end > 0 {
+            let mut start = end - 1;
+            while ext[start] & WITNESS == 0 {
+                start -= 1;
+            }
+            let clause: Vec<Lit> = ext[start..end].iter().map(|&e| Lit(e & !WITNESS)).collect();
+            let satisfied = clause.iter().any(|l| value[l.vidx()] != l.negated());
+            if !satisfied {
+                let w = clause[0];
+                value[w.vidx()] = !w.negated();
+                if target.iter().any(|t| t.var() == w.var()) {
+                    let d: Vec<String> = clause
+                        .iter()
+                        .map(|l| format!("{}{}", l, if self.flags[l.vidx()] & ELIMINATED != 0 { "E" } else { "" }))
+                        .collect();
+                    let tsat = target.iter().any(|l| value[l.vidx()] != l.negated());
+                    eprintln!("FLIP {} by {:?} at {} -> target satisfied {}", w, d, start, tsat);
+                }
+            }
+            end = start;
+        }
+    }
+
     /// Push a clause with witness literal `witness` (which must be in the
     /// clause) onto the extension stack.
     pub fn push_extension(&mut self, witness: Lit, lits: &[Lit]) {
+        self.trace(&format!("extension(witness {witness})"), lits);
         self.extension.push(witness.0 | WITNESS);
         for &l in lits {
             if l != witness {
@@ -666,6 +727,19 @@ impl Solver {
 
     pub fn solve(&mut self) -> SolveResult {
         let res = self.search();
+        if let Some(log) = &self.root_log {
+            for &l in log {
+                if self.value(l) <= 0 || self.flags[l.vidx()] & ELIMINATED != 0 {
+                    eprintln!(
+                        "ROOT VIOLATION {} value {} level {} flags {}",
+                        l,
+                        self.value(l),
+                        self.assigned[l.vidx()].level,
+                        self.flags[l.vidx()]
+                    );
+                }
+            }
+        }
         if res == SolveResult::Sat && std::env::var_os("CRABSAT_CHECK_DB").is_some() {
             if let Some(c) = self.unsatisfied_clause() {
                 let info: Vec<String> = c

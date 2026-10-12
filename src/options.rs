@@ -122,7 +122,7 @@ options! {
     eliminaterounds: u32 = 2, "elimination rounds limit";
     ands: bool = true, "extract and eliminate and gates";
     ifthenelse: bool = true, "extract and eliminate if-then-else gates";
-    xors: bool = true, "extract and eliminate XOR gates";
+    xors: bool = false, "extract and eliminate XOR gates";
     forwardeffort: u64 = 100, "effort in per mille";
     subsumeclslim: u64 = 1000, "subsumption clause size limit";
     probe: bool = true, "enable probing";

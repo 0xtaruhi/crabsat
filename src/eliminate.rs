@@ -454,6 +454,28 @@ impl Solver {
         let Some(resolvents) = self.resolve(lit, &pos, &neg, gates, bound) else {
             return false;
         };
+        if std::env::var("CRABSAT_TRACE_VAR").ok().and_then(|x| x.parse::<u32>().ok())
+            == Some(v + 1)
+        {
+            let show = |s: &Solver, side_lit: Lit, side: &Side| {
+                let mut out = Vec::new();
+                for (k, &occ) in side.occs.iter().enumerate() {
+                    let mut l = Vec::new();
+                    s.occ_lits(side_lit, occ, &mut l);
+                    let d: Vec<String> = l
+                        .iter()
+                        .map(|x| format!("{}{}", x, match s.value(*x) { 0 => "", v if v > 0 => "T", _ => "F" }))
+                        .collect();
+                    out.push(format!("{}{:?}", if side.gate[k] { "G" } else { "" }, d));
+                }
+                out
+            };
+            eprintln!("ELIM {} gates {} pos {:?}", lit, gates, show(self, lit, &pos));
+            eprintln!("ELIM neg {:?}", show(self, !lit, &neg));
+            for r in &resolvents {
+                eprintln!("ELIM resolvent {:?}", r);
+            }
+        }
         // Add resolvents.
         for r in &resolvents {
             if let Some(p) = self.proof.as_mut() {

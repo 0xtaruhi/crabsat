@@ -49,6 +49,7 @@ impl Solver {
     /// Replace clause `c` by the clause `lits` (a subset of its literals),
     /// producing a binary clause, unit or empty clause if necessary.
     pub fn strengthen_to(&mut self, c: CRef, lits: &[Lit]) -> Simplified {
+        self.trace("strengthen-from", self.arena.lits(c));
         if let Some(p) = self.proof.as_mut() {
             p.add(lits);
         }

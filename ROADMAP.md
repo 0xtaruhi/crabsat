@@ -49,7 +49,7 @@ kissat (v4.0.4, MIT) の設計を参照した、Rust 製の高性能 CDCL SAT �
 - [x] shrinking (kissat の block 単位 all-UIP 短縮、shrink=3)
 - [x] reason-side bumping (decision rate 制限付き)
 - [x] tier1/tier2 動的計算と reduce (used カウンタ、reducehigh/low)
-- [ ] OTFS (on-the-fly strengthening)
+- [x] OTFS (on-the-fly strengthening)
 - [x] eager subsumption
 - [x] restart 時の trail 再利用
 - [x] 統計出力 (`c` 行)
@@ -66,9 +66,10 @@ kissat (v4.0.4, MIT) の設計を参照した、Rust 製の高性能 CDCL SAT �
 - [ ] transitive reduction
 - [x] vivification (tier1/tier2/tier3/irredundant)
 - [x] subsumption / strengthening (forward, one-watch)
-- [x] BVE: bounded variable elimination + ゲート検出 (AND / 等価)
-- [ ] ゲート検出 (XOR / ITE / 定義抽出)
+- [x] BVE: bounded variable elimination + ゲート検出 (AND / 等価 / ITE、XOR は既定で無効)
+- [ ] 定義抽出 (kitten)
 - [x] モデル復元 (extension stack)
+- [x] transitive reduction
 - [ ] backbone
 - **DoD**: kissat デフォルトの 70〜80% 程度の解けた問題数
 
@@ -87,7 +88,8 @@ kissat (v4.0.4, MIT) の設計を参照した、Rust 製の高性能 CDCL SAT �
 ### M5: 差別化
 
 - [ ] IPASIR 互換の増分 API (assumptions)
-- [ ] 並列ポートフォリオ + 節共有
+- [x] 並列ポートフォリオ (`--threads=N`、root unit の共有)
+- [ ] 節共有の拡張 (2リテラル節、低 glue 学習節)
 
 ## ベンチマーク方針
 
@@ -116,3 +118,18 @@ kissat (v4.0.4, MIT) の設計を参照した、Rust 製の高性能 CDCL SAT �
 
 検証: 毎段階で `scripts/fuzz.py` (ランダム k-SAT、AMO 構造、miter 回路) を各種オプションで
 数千件実行し、Kissat との結果一致・`--check` によるモデル検証・drat-trim による証明検証を確認。
+
+### 2026-10-13: ポートフォリオで誤った SAT を返すバグの修正
+
+OTFS で強化した理由節が衝突節を包含するとき、衝突節を削除していたが、衝突節が既約節で
+理由節が冗長節の場合に既約節が失われていた (Kissat は理由節を既約節に昇格させる)。
+その後の BVE の復元が失われた節に依存し、不正なモデルが生じた。単独実行でも起こり得るが、
+unit 共有で探索経路が変わると頻発した。取り込み unit の記録と再生 (`CRABSAT_IMPORT_LOG` /
+`CRABSAT_REPLAY`) と節の追跡 (`CRABSAT_TRACE`) で特定。
+
+| 版 | 解けた数 | UNSAT PAR-2 | SAT PAR-2 |
+|---|---|---|---|
+| 修正後 単独 | 65/71 | 407 | 2543 |
+| 修正後 8 スレッド | 70/71 | 338 | 958 |
+
+(UNSAT 34 問で XOR ゲートを外すと PAR-2 391 → 297 のため、BVE の XOR ゲートは既定で無効化)

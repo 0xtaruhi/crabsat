@@ -302,8 +302,7 @@ impl Solver {
                 if resolved == 1 && self.resolvent_size < conflict_size {
                     if let Conflict::Large(d) = conflict {
                         if !self.arena.garbage(d) && d != reason {
-                            self.stats.otfs_subsumed += 1;
-                            self.mark_garbage(d);
+                            self.on_the_fly_subsume(strengthened, d);
                         }
                     }
                 }
@@ -313,6 +312,38 @@ impl Solver {
         self.clause[0] = !uip;
         self.stats.literals_deduced += self.clause.len() as u64;
         None
+    }
+
+    /// The strengthened clause `c` subsumes the conflict `d`, which is
+    /// deleted.  If `d` was irredundant, `c` must become irredundant too
+    /// (Kissat `kissat_on_the_fly_subsume`).
+    fn on_the_fly_subsume(&mut self, c: Conflict, d: CRef) {
+        self.stats.otfs_subsumed += 1;
+        let d_redundant = self.arena.redundant(d);
+        let d_glue = self.arena.glue(d);
+        self.mark_garbage(d);
+        match c {
+            Conflict::Large(c) => {
+                if !self.arena.redundant(c) {
+                    return;
+                }
+                if d_redundant {
+                    if self.arena.glue(c) > d_glue {
+                        self.arena.set_glue(c, d_glue);
+                    }
+                    return;
+                }
+                self.arena.set_redundant(c, false);
+                self.stats.clauses_redundant -= 1;
+                self.stats.clauses_irredundant += 1;
+                let lits = self.arena.lits(c).to_vec();
+                for l in lits {
+                    self.mark_added_lit(l);
+                }
+            }
+            // Binary clauses are always irredundant.
+            Conflict::Binary(..) => {}
+        }
     }
 
     /// Remove the (true) literal `lit` and root-level literals from its

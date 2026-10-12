@@ -37,6 +37,8 @@ impl Solver {
                 break SolveResult::Unknown;
             } else if self.level == 0 && self.shared.is_some() && !self.share_units() {
                 break SolveResult::Unsat;
+            } else if self.level == 0 && !self.replay_units() {
+                break SolveResult::Unsat;
             } else if self.reducing() {
                 self.reduce();
                 self.last_reduce_conflicts = self.stats.conflicts;
