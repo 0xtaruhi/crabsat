@@ -236,3 +236,28 @@ simultaneously are directly comparable.)
 - Tests: random sequences of clause additions, assumptions and solve calls
   checked against fresh solvers (results, models, failed assumptions as
   unsatisfiable cores), also with aggressive elimination and compaction.
+
+### 2026-10-13: Code structure, portability and profiling
+
+- Public API narrowed to `Solver`, `Options`, `SolveResult`, `Stats`,
+  `Proof`, `PortfolioResult`, the callback types and the `dimacs` / `ipasir`
+  modules; the portfolio moved into the library; typed flag sets; solver
+  state split into sub-structs (analysis, sharing, incremental, external
+  variables, delays); environment variable debugging hooks removed.
+- Compressed input is decoded in-process with pure Rust decoders (feature
+  `compression`), in a separate thread; CI runs on Linux, macOS and Windows.
+- Profile-guided speedups found with `perf`, all keeping the search
+  identical (same statistics on fixed instances): sorting packed keys
+  instead of comparing through indirections in conflict analysis, slices in
+  propagation, a VMTF queue for kitten decisions, cached binary clause
+  counts in factorization.  About 10% fewer cycles for the same work.
+
+| union, 162 instances / 60 s, run simultaneously | solved | SAT | UNSAT | PAR-2 |
+|---|---|---|---|---|
+| before profiling | 106 | 54 | 52 | 7982 |
+| after profiling | 107 | 55 | 52 | 7805 |
+
+On the 106 instances solved by both (identical answers), the geometric mean
+runtime ratio is 0.897 (instances above 1 s) and the total time drops from
+1262 s to 1148 s.  (Absolute numbers are not comparable with earlier tables:
+the machine was under different load.)
