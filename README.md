@@ -26,7 +26,8 @@ A high-performance CDCL SAT solver written in Rust, following the design of
 ## Building
 
 ```sh
-cargo build --release
+cargo install crabsat      # from crates.io
+cargo build --release      # from a checkout
 ```
 
 ## Usage
@@ -65,24 +66,51 @@ crabsat or Kissat 4.0.4 within 120 s, 60 s time limit, same machine load):
 
 See [ROADMAP.md](ROADMAP.md) for the roadmap and development log.
 
-## Incremental API
+## Library (incremental API)
 
-Rust:
+```toml
+[dependencies]
+crabsat = "0.1"
+```
 
 ```rust
-use crabsat::{Options, SolveResult, Solver};
+use crabsat::{Callbacks, Options, SolveResult, Solver};
 
-let mut s = Solver::new(Options { incremental: true, ..Options::default() });
+let mut s = Solver::new(Options::default());
 s.add_clause(&[1, 2]);
 s.add_clause(&[-1, 2]);
 assert_eq!(s.solve(), SolveResult::Sat);
 assert_eq!(s.val(2), 2);
-s.assume(-2);
+
+s.assume(-2); // for the next call only
 assert_eq!(s.solve(), SolveResult::Unsat);
-assert!(s.failed(-2));
+assert_eq!(s.failed_assumptions().collect::<Vec<_>>(), vec![-2]);
+
+// Callbacks may borrow local data.
+struct Learned<'a>(&'a mut Vec<Vec<i32>>);
+impl Callbacks for Learned<'_> {
+    fn learn_limit(&self) -> usize { 8 }
+    fn learn(&mut self, clause: &[i32]) { self.0.push(clause.to_vec()) }
+}
+let mut learned = Vec::new();
+s.add_clause(&[-2, 3]);
+s.solve_with(&mut Learned(&mut learned));
 ```
 
-C (IPASIR, header [`include/ipasir.h`](include/ipasir.h)):
+Also available: `interrupter()` (stop a call from another thread),
+per-call conflict and decision limits, `phase` / `unphase`, `freeze` /
+`melt` and statistics.  Clauses and assumptions may be added between calls
+with all inprocessing enabled except bounded variable addition: variables
+removed by elimination or substitution are reactivated (with their saved
+clauses) when used again.  `Options { incremental: false, .. }` selects the
+one-shot mode of the command line solver.  The minimum supported Rust
+version is 1.87.
+
+### C (IPASIR)
+
+The `ipasir` workspace member builds a static and a shared library with the
+[IPASIR](https://github.com/biotomas/ipasir) interface (header
+[`include/ipasir.h`](include/ipasir.h)):
 
 ```sh
 cargo build --release -p crabsat-ipasir
@@ -95,11 +123,7 @@ This links the static library on Linux; the shared library
 and `cargo rustc --release -p crabsat-ipasir --crate-type staticlib --
 --print native-static-libs` prints the system libraries needed for static
 linking on other platforms.  CI builds and runs the example on Linux, macOS
-and Windows.  All inprocessing
-stays enabled in incremental mode except bounded variable addition: variables
-of assumptions are frozen during a call, and variables removed by elimination
-or substitution are reactivated (with their saved clauses) when later clauses
-or assumptions mention them.
+and Windows.
 
 ## Testing
 

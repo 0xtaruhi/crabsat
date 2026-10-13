@@ -261,3 +261,23 @@ On the 106 instances solved by both (identical answers), the geometric mean
 runtime ratio is 0.897 (instances above 1 s) and the total time drops from
 1262 s to 1148 s.  (Absolute numbers are not comparable with earlier tables:
 the machine was under different load.)
+
+### 2026-10-14: Library API for crates.io and RustSAT
+
+- `Callbacks` trait for termination and learned clauses, passed per call to
+  `Solver::solve_with` (callbacks may borrow local data; `Solver` stays
+  `Send`); `Interrupter` handle; conflict/decision limits per call; forced
+  phases (`phase` / `unphase`); `freeze` / `melt`; `failed_assumptions`;
+  invalid literals are rejected.
+- Incremental mode is the library default; the command line solver keeps
+  the one-shot mode (search unchanged).
+- Minimum supported Rust version 1.87 (the MSRV of RustSAT), checked in CI.
+
+| union, 162 instances / 60 s, run simultaneously | solved | SAT | UNSAT | PAR-2 |
+|---|---|---|---|---|
+| Kissat 4.0.4 | 101 | 55 | 46 | 8657 |
+| crabsat | 105 | 54 | 51 | 8235 |
+
+Same answers on the 87 instances solved by both; there crabsat is faster on
+41 and Kissat on 46 (geometric mean runtime ratio crabsat/Kissat 0.93 for
+instances above 1 s, total time 950 s vs 771 s).

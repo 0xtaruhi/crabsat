@@ -86,8 +86,11 @@ impl fmt::Display for Lit {
 /// Result of a solver call.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum SolveResult {
+    /// Satisfiable (a model is available).
     Sat,
+    /// Unsatisfiable (under the assumptions, if any).
     Unsat,
+    /// Stopped by a limit, an interrupt or the termination callback.
     Unknown,
 }
 

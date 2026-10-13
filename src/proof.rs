@@ -3,16 +3,18 @@
 use crate::types::Lit;
 use std::io::{self, BufWriter, Write};
 
+/// A DRAT proof writer (see [`Solver::set_proof`](crate::Solver::set_proof)).
 pub struct Proof {
     out: BufWriter<Box<dyn Write + Send>>,
     binary: bool,
-    pub added: u64,
-    pub deleted: u64,
+    pub(crate) added: u64,
+    pub(crate) deleted: u64,
     /// Internal variable -> external variable.
-    pub map: Vec<u32>,
+    pub(crate) map: Vec<u32>,
 }
 
 impl Proof {
+    /// Write the proof to `out`, in binary DRAT format if `binary`.
     pub fn new(out: Box<dyn Write + Send>, binary: bool) -> Proof {
         Proof {
             out: BufWriter::with_capacity(1 << 20, out),

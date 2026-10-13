@@ -821,7 +821,7 @@ impl Solver {
         let not_uip = self.analysis.clause[0];
         let size = self.analysis.clause.len();
         let glue = self.analysis.levels.len() as u32;
-        if self.incremental.learn.is_some() {
+        if self.incremental.learn_limit > 0 {
             let lits = std::mem::take(&mut self.analysis.clause);
             self.learn_callback(&lits);
             self.analysis.clause = lits;

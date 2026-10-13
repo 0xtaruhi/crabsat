@@ -14,9 +14,58 @@
 //! (see `Options::incremental`).
 
 use crate::solver::{DECISION_REASON, ELIMINATE, ELIMINATED, Frame, SUBSUME, Solver, WITNESS};
-use crate::types::{Lit, Var};
+use crate::types::{Lit, SolveResult, Var};
+use std::ptr::NonNull;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::flags::FROZEN;
+
+/// Callbacks invoked during [`Solver::solve_with`].  All methods have
+/// defaults, so an implementation only overrides what it needs; `()`
+/// implements the trait with no callbacks.
+pub trait Callbacks {
+    /// Polled regularly during the search; returning true stops the call
+    /// with [`SolveResult::Unknown`](crate::SolveResult::Unknown).
+    fn terminate(&mut self) -> bool {
+        false
+    }
+
+    /// Learned clauses with at most this many literals are passed to
+    /// [`Callbacks::learn`] (0 disables it).
+    fn learn_limit(&self) -> usize {
+        0
+    }
+
+    /// Receives a learned clause (DIMACS literals).
+    fn learn(&mut self, _clause: &[i32]) {}
+}
+
+impl Callbacks for () {}
+
+/// The callbacks of the running `solve_with` call, with their lifetime
+/// erased.  Only set (and only dereferenced) during that call.
+#[derive(Clone, Copy)]
+pub(crate) struct CallbacksPtr(NonNull<dyn Callbacks>);
+
+// SAFETY: the pointer is only dereferenced during the `solve_with` call that
+// stored it, on the thread running that call (which holds the exclusive
+// borrow of the callbacks); a `Solver` can only move between threads
+// outside of such a call.
+unsafe impl Send for CallbacksPtr {}
+
+/// A handle to interrupt a solver from another thread (see
+/// [`Solver::interrupter`]).
+#[derive(Clone, Debug)]
+pub struct Interrupter(pub(crate) Arc<AtomicBool>);
+
+impl Interrupter {
+    /// Stop the running solve call (or the next one if none is running);
+    /// it returns [`SolveResult::Unknown`](crate::SolveResult::Unknown).
+    pub fn interrupt(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
 
 /// State of the incremental interface.
 #[derive(Default)]
@@ -25,22 +74,25 @@ pub struct Incremental {
     pub assumptions: Vec<Lit>,
     /// Failed assumptions of the last unsatisfiable call.
     pub failed: Vec<Lit>,
-    /// Model of the last satisfiable call (in incremental mode).
+    /// Model of the last satisfiable call.
     pub model: Vec<i32>,
-    pub terminate: Option<TerminateFn>,
-    pub learn: Option<(usize, LearnFn)>,
+    pub callbacks: Option<CallbacksPtr>,
+    /// Cached `learn_limit` of the current callbacks.
+    pub learn_limit: usize,
     pub terminate_calls: std::cell::Cell<u32>,
+    /// User interrupt flag (reset after the call it stopped).
+    pub interrupt: Option<Arc<AtomicBool>>,
+    /// Forced phases of external variables (1, -1 or 0 = none).
+    pub forced: Vec<i8>,
+    pub any_forced: bool,
+    /// Freeze counts of external variables.
+    pub frozen: Vec<u32>,
 }
-
-/// Callback polled during search; returning true stops the search.
-pub type TerminateFn = Box<dyn Fn() -> bool + Send>;
-/// Callback receiving learned clauses (DIMACS literals).
-pub type LearnFn = Box<dyn FnMut(&[i32]) + Send>;
 
 impl Solver {
     /// Add an assumption (DIMACS literal) for the next `solve` call.
     pub fn assume(&mut self, d: i32) {
-        let e = Lit::from_dimacs(d);
+        let e = dimacs_lit(d);
         self.prepare_external(e.vidx());
         self.incremental.assumptions.push(e);
     }
@@ -48,14 +100,14 @@ impl Solver {
     /// Whether the assumption `d` was used to derive unsatisfiability in the
     /// last `solve` call.
     pub fn failed(&self, d: i32) -> bool {
-        let e = Lit::from_dimacs(d);
+        let e = dimacs_lit(d);
         self.incremental.failed.contains(&e)
     }
 
     /// Value of a literal in the model of the last satisfiable `solve` call:
     /// `d` if true, `-d` if false, `0` if unknown.
     pub fn val(&self, d: i32) -> i32 {
-        let v = d.unsigned_abs() as usize - 1;
+        let v = dimacs_lit(d).vidx();
         match self.incremental.model.get(v) {
             Some(&m) if (m > 0) == (d > 0) => d,
             Some(_) => -d,
@@ -157,6 +209,9 @@ impl Solver {
                 self.grow_internal(v + 1);
                 self.ext.e2i[e] = Lit::new(v as Var, false);
                 self.ext.i2e.push(e as u32);
+                if self.frozen_external(e) {
+                    self.flags[v].insert(FROZEN);
+                }
                 if let Some(p) = self.proof.as_mut() {
                     p.map.push(e as u32);
                 }
@@ -191,7 +246,11 @@ impl Solver {
 
     pub(crate) fn end_assumptions(&mut self) {
         for k in 0..self.incremental.assumptions.len() {
-            if let Some(l) = self.internal(self.incremental.assumptions[k]) {
+            let e = self.incremental.assumptions[k];
+            if self.frozen_external(e.vidx()) {
+                continue;
+            }
+            if let Some(l) = self.internal(e) {
                 self.flags[l.vidx()].remove(FROZEN);
             }
         }
@@ -287,39 +346,145 @@ impl Solver {
         self.incremental.failed = failed;
     }
 
-    /// Set a callback polled during search (about every 64 checks);
-    /// returning true stops the search with `SolveResult::Unknown`.
-    pub fn set_terminate(&mut self, callback: Option<TerminateFn>) {
-        self.incremental.terminate = callback;
+    /// Solve under the current assumptions, calling `callbacks` during the
+    /// search.  The assumptions are cleared afterwards.
+    pub fn solve_with<C: Callbacks>(&mut self, callbacks: &mut C) -> SolveResult {
+        let ptr: NonNull<dyn Callbacks + '_> = NonNull::from(callbacks as &mut dyn Callbacks);
+        // SAFETY: only the lifetime is erased; the pointer is removed before
+        // this function returns and is not used after that (it is
+        // overwritten at the start of every call).
+        let ptr: NonNull<dyn Callbacks> = unsafe { std::mem::transmute(ptr) };
+        self.incremental.callbacks = Some(CallbacksPtr(ptr));
+        self.incremental.learn_limit = unsafe { ptr.as_ref() }.learn_limit();
+        self.incremental.terminate_calls.set(0);
+        let res = self.solve_internal();
+        self.incremental.callbacks = None;
+        res
     }
 
-    /// Set a callback receiving every learned clause with at most
-    /// `max_length` literals.
-    pub fn set_learn(&mut self, max_length: usize, callback: Option<LearnFn>) {
-        self.incremental.learn = callback.map(|f| (max_length, f));
+    /// A handle to interrupt this solver from another thread.
+    pub fn interrupter(&mut self) -> Interrupter {
+        Interrupter(
+            self.incremental
+                .interrupt
+                .get_or_insert_with(|| Arc::new(AtomicBool::new(false)))
+                .clone(),
+        )
     }
 
-    /// Call the termination callback (throttled).
-    pub(crate) fn terminate_callback(&self) -> bool {
-        let Some(cb) = &self.incremental.terminate else {
+    /// The failed assumptions of the last unsatisfiable call: a subset of
+    /// the assumptions which is unsatisfiable together with the clauses
+    /// (empty if the clauses alone are unsatisfiable).
+    pub fn failed_assumptions(&self) -> impl Iterator<Item = i32> + '_ {
+        self.incremental.failed.iter().map(|l| l.to_dimacs())
+    }
+
+    /// Prefer the phase of `lit` when deciding its variable.
+    pub fn phase(&mut self, lit: i32) {
+        let e = dimacs_lit(lit);
+        self.reserve_vars(e.vidx() + 1);
+        if self.incremental.forced.len() < self.ext.vars {
+            self.incremental.forced.resize(self.ext.vars, 0);
+        }
+        self.incremental.forced[e.vidx()] = if e.negated() { -1 } else { 1 };
+        self.incremental.any_forced = true;
+    }
+
+    /// Undo [`Solver::phase`] for variable `var`.
+    pub fn unphase(&mut self, var: i32) {
+        let e = dimacs_lit(var).vidx();
+        if let Some(f) = self.incremental.forced.get_mut(e) {
+            *f = 0;
+        }
+    }
+
+    /// Forced phase of internal variable `v` (0 if none).
+    #[inline]
+    pub(crate) fn forced_phase(&self, v: Var) -> i8 {
+        let e = self.ext.i2e[v as usize] as usize;
+        self.incremental.forced.get(e).copied().unwrap_or(0)
+    }
+
+    /// Protect variable `var` from elimination and substitution until it
+    /// is melted as often as it was frozen.  (Not needed for correctness:
+    /// eliminated variables are reactivated when used again, which is more
+    /// expensive.)
+    pub fn freeze(&mut self, var: i32) {
+        let e = dimacs_lit(var).vidx();
+        self.prepare_external(e);
+        if self.incremental.frozen.len() < self.ext.vars {
+            self.incremental.frozen.resize(self.ext.vars, 0);
+        }
+        self.incremental.frozen[e] += 1;
+        if let Some(l) = self.internal(Lit::new(e as Var, false)) {
+            self.flags[l.vidx()].insert(FROZEN);
+        }
+    }
+
+    /// Undo one [`Solver::freeze`] of variable `var`.
+    pub fn melt(&mut self, var: i32) {
+        let e = dimacs_lit(var).vidx();
+        let Some(count) = self.incremental.frozen.get_mut(e) else {
+            return;
+        };
+        if *count == 0 {
+            return;
+        }
+        *count -= 1;
+        if *count == 0 {
+            if let Some(l) = self.internal(Lit::new(e as Var, false)) {
+                self.flags[l.vidx()].remove(FROZEN);
+            }
+        }
+    }
+
+    /// Whether variable `var` is frozen.
+    pub fn is_frozen(&self, var: i32) -> bool {
+        let e = dimacs_lit(var).vidx();
+        self.incremental.frozen.get(e).is_some_and(|&c| c > 0)
+    }
+
+    fn frozen_external(&self, e: usize) -> bool {
+        self.incremental.frozen.get(e).is_some_and(|&c| c > 0)
+    }
+
+    /// Whether the search must stop: interrupted, or the termination
+    /// callback (polled about every 64 checks) says so.
+    pub(crate) fn interrupted(&self) -> bool {
+        if self
+            .incremental
+            .interrupt
+            .as_ref()
+            .is_some_and(|f| f.load(Ordering::Relaxed))
+        {
+            return true;
+        }
+        let Some(cb) = self.incremental.callbacks else {
             return false;
         };
-        let n = self.incremental.terminate_calls.get().wrapping_add(1);
-        self.incremental.terminate_calls.set(n);
-        n % 64 == 1 && cb()
+        let n = self.incremental.terminate_calls.get();
+        self.incremental.terminate_calls.set(n.wrapping_add(1));
+        // SAFETY: set by the running `solve_with` call (see `CallbacksPtr`);
+        // the callbacks are not otherwise accessed during the call.
+        n.is_multiple_of(64) && unsafe { (*cb.0.as_ptr()).terminate() }
     }
 
     /// Report the learned clause `lits` to the learn callback.
     pub(crate) fn learn_callback(&mut self, lits: &[Lit]) {
-        let Some((max_length, _)) = self.incremental.learn else {
+        if lits.len() > self.incremental.learn_limit {
+            return;
+        }
+        let Some(cb) = self.incremental.callbacks else {
             return;
         };
-        if lits.len() > max_length {
-            return;
-        }
         let clause: Vec<i32> = lits.iter().map(|&l| self.external(l).to_dimacs()).collect();
-        if let Some((_, f)) = self.incremental.learn.as_mut() {
-            f(&clause);
-        }
+        // SAFETY: as in `interrupted`.
+        unsafe { (*cb.0.as_ptr()).learn(&clause) };
     }
+}
+
+/// Convert a DIMACS literal, rejecting 0.
+pub(crate) fn dimacs_lit(d: i32) -> Lit {
+    assert!(d != 0 && d != i32::MIN, "invalid literal {d}");
+    Lit::from_dimacs(d)
 }

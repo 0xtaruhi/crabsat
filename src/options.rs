@@ -2,9 +2,10 @@
 
 macro_rules! options {
     ($( $name:ident : $ty:ty = $default:expr, $help:expr; )*) => {
+        /// Solver options (see `crabsat --help` for the command line names).
         #[derive(Clone, Debug)]
         pub struct Options {
-            $( pub $name: $ty, )*
+            $( #[doc = $help] pub $name: $ty, )*
         }
 
         impl Default for Options {
@@ -26,6 +27,7 @@ macro_rules! options {
                 }
             }
 
+            /// Help text listing all options with their defaults.
             pub fn usage() -> String {
                 let mut s = String::new();
                 $( s.push_str(&format!("  --{}={:<12} {}\n", stringify!($name),
@@ -104,7 +106,7 @@ options! {
     restartmargin: u64 = 10, "fast/slow margin in percent";
     restartreusetrail: bool = true, "restarts tries to reuse trail";
     seed: u64 = 0, "random seed";
-    incremental: bool = false, "incremental mode (keep all eliminated clauses, no factor)";
+    incremental: bool = true, "incremental mode: clauses and assumptions may be added after solving (keeps eliminated clauses, no factor; the command line solver turns it off)";
     share: bool = true, "share learned clauses in portfolio mode";
     portfolio: u32 = 1, "portfolio diversification table (0=old, 1=default)";
     shareglue: u32 = 2, "maximum glue of shared clauses";

@@ -5,8 +5,11 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
 
+/// The `p cnf <vars> <clauses>` header line.
 pub struct Header {
+    /// Number of variables.
     pub vars: usize,
+    /// Number of clauses.
     pub clauses: usize,
 }
 

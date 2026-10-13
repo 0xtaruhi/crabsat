@@ -2,7 +2,11 @@
 
 pub const MAX_GLUE_USED: usize = 127;
 
+/// Solver statistics (see [`Solver::stats`](crate::Solver::stats)).  The
+/// counters are cumulative over all calls; their names follow the `c`
+/// statistics lines of the command line solver.
 #[derive(Clone, Debug)]
+#[allow(missing_docs)]
 pub struct Stats {
     pub conflicts: u64,
     pub decisions: u64,

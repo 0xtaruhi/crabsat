@@ -7,6 +7,10 @@ description = "A high-performance CDCL SAT solver inspired by Kissat"
 license = "MIT"
 repository = "https://github.com/0xtaruhi/crabsat"
 readme = "README.md"
+documentation = "https://docs.rs/crabsat"
+keywords = ["sat", "sat-solver", "cdcl", "ipasir", "incremental"]
+categories = ["algorithms", "mathematics", "command-line-utilities"]
+exclude = ["/.github", "/scripts", "/ipasir", "/include", "/examples"]
 
 [workspace]
 members = ["ipasir"]

@@ -69,8 +69,11 @@ pub enum Conflict {
 
 #[derive(Default, Clone)]
 pub struct Limits {
+    /// Per-call limits and their absolute values in the current call.
     pub conflicts: Option<u64>,
     pub decisions: Option<u64>,
+    pub conflicts_end: Option<u64>,
+    pub decisions_end: Option<u64>,
     pub mode_count: u64,
     pub mode_ticks: u64,
     pub mode_conflicts: u64,
@@ -143,6 +146,7 @@ impl Delay {
     }
 }
 
+/// A SAT solver instance (see the [crate documentation](crate)).
 pub struct Solver {
     pub(crate) opts: Options,
     pub(crate) vars: usize,
@@ -226,6 +230,7 @@ pub struct Solver {
 }
 
 impl Solver {
+    /// A new solver with the given options.
     pub fn new(opts: Options) -> Solver {
         let mut s = Solver {
             opts,
@@ -293,12 +298,15 @@ impl Solver {
         s
     }
 
+    /// Write a DRAT proof of unsatisfiability to `proof` (set this before
+    /// adding clauses).
     pub fn set_proof(&mut self, mut proof: Proof) {
         proof.map = self.ext.i2e.clone();
         self.proof = Some(proof);
     }
 
-    /// Make sure external variables `0..evars` exist.
+    /// Make sure variables `1..=evars` exist (variables are also created
+    /// on first use).
     pub fn reserve_vars(&mut self, evars: usize) {
         if evars <= self.ext.vars {
             return;
@@ -612,7 +620,7 @@ impl Solver {
     pub fn add_clause(&mut self, dimacs: &[i32]) {
         let mut lits: Vec<Lit> = Vec::with_capacity(dimacs.len());
         for &d in dimacs {
-            let e = Lit::from_dimacs(d);
+            let e = crate::incremental::dimacs_lit(d);
             self.prepare_external(e.vidx());
             match self.internal(e) {
                 Some(l) => lits.push(l),
@@ -693,9 +701,15 @@ impl Solver {
         }
     }
 
-    /// The satisfying assignment in DIMACS form (1-based, signed), with
-    /// eliminated variables reconstructed from the extension stack.
-    pub fn model(&self) -> Vec<i32> {
+    /// The model of the last satisfiable call: entry `v - 1` is `v` or
+    /// `-v` (empty if the last call was not satisfiable).
+    pub fn model(&self) -> &[i32] {
+        &self.incremental.model
+    }
+
+    /// Reconstruct the full assignment (DIMACS form) from the current
+    /// trail and the extension stack.
+    pub(crate) fn reconstruct_model(&self) -> Vec<i32> {
         let mut value: Vec<bool> = (0..self.ext.vars).map(|e| self.external_value(e)).collect();
         let ext = &self.ext.extension;
         let mut end = ext.len();
@@ -741,14 +755,33 @@ impl Solver {
         }
     }
 
+    /// Solve under the current assumptions (which are cleared afterwards).
     pub fn solve(&mut self) -> SolveResult {
+        self.solve_with(&mut ())
+    }
+
+    pub(crate) fn solve_internal(&mut self) -> SolveResult {
         if self.level > 0 {
             self.backtrack_without_updating_phases(0);
         }
+        self.incremental.model.clear();
         self.start_assumptions();
-        let res = self.search();
-        if res == SolveResult::Sat && self.opts.incremental {
-            self.incremental.model = self.model();
+        // Conflict and decision limits count from the start of each call.
+        self.limits.conflicts_end = self.limits.conflicts.map(|l| self.stats.conflicts + l);
+        self.limits.decisions_end = self.limits.decisions.map(|l| self.stats.decisions + l);
+        let res = if self.interrupted_now() {
+            SolveResult::Unknown
+        } else {
+            self.search()
+        };
+        if res == SolveResult::Sat {
+            self.incremental.model = self.reconstruct_model();
+        }
+        if res == SolveResult::Unknown {
+            // An interrupt stops one call.
+            if let Some(f) = &self.incremental.interrupt {
+                f.store(false, Ordering::Relaxed);
+            }
         }
         if res != SolveResult::Unsat || self.inconsistent {
             self.incremental.failed.clear();
@@ -761,26 +794,33 @@ impl Solver {
         res
     }
 
+    /// Whether the search must stop (portfolio stop flag, interrupt or
+    /// termination callback).
     pub(crate) fn terminated(&self) -> bool {
         self.terminate
             .as_ref()
             .is_some_and(|t| t.load(Ordering::Relaxed))
-            || self.terminate_callback()
+            || self.interrupted()
     }
 
-    /// Stop the search (with `SolveResult::Unknown`) when `flag` is set.
-    pub fn set_terminate_flag(&mut self, flag: Arc<AtomicBool>) {
-        self.terminate = Some(flag);
+    /// Check for termination before the search (the callback is always
+    /// called here).
+    fn interrupted_now(&self) -> bool {
+        self.incremental.terminate_calls.set(0);
+        self.terminated()
     }
 
+    /// Limit the number of conflicts of each solve call (`None`: no limit).
     pub fn set_conflict_limit(&mut self, conflicts: Option<u64>) {
         self.limits.conflicts = conflicts;
     }
 
+    /// Limit the number of decisions of each solve call (`None`: no limit).
     pub fn set_decision_limit(&mut self, decisions: Option<u64>) {
         self.limits.decisions = decisions;
     }
 
+    /// Statistics (cumulative over all calls).
     pub fn stats(&self) -> &Stats {
         &self.stats
     }

@@ -5,13 +5,43 @@
 //! (interrupted), `ipasir_val` is valid after SAT and `ipasir_failed` after
 //! UNSAT.
 
-use crate::{Options, SolveResult, Solver};
+use crate::{Callbacks, Options, SolveResult, Solver};
 use std::ffi::{c_char, c_int, c_void};
 
-/// Solver handle with the clause being added.
+/// Solver handle with the clause being added and the C callbacks.
 pub struct IpasirSolver {
     solver: Solver,
     clause: Vec<i32>,
+    callbacks: CCallbacks,
+}
+
+type TerminateFn = extern "C" fn(*mut c_void) -> c_int;
+type LearnFn = extern "C" fn(*mut c_void, *mut i32);
+
+#[derive(Default)]
+struct CCallbacks {
+    terminate: Option<(*mut c_void, TerminateFn)>,
+    learn: Option<(*mut c_void, usize, LearnFn)>,
+    buffer: Vec<i32>,
+}
+
+impl Callbacks for CCallbacks {
+    fn terminate(&mut self) -> bool {
+        self.terminate.is_some_and(|(state, f)| f(state) != 0)
+    }
+
+    fn learn_limit(&self) -> usize {
+        self.learn.map_or(0, |(_, max_length, _)| max_length)
+    }
+
+    fn learn(&mut self, clause: &[i32]) {
+        if let Some((state, _, f)) = self.learn {
+            self.buffer.clear();
+            self.buffer.extend_from_slice(clause);
+            self.buffer.push(0);
+            f(state, self.buffer.as_mut_ptr());
+        }
+    }
 }
 
 /// Name and version of the solver.
@@ -33,6 +63,7 @@ pub extern "C" fn ipasir_init() -> *mut c_void {
     Box::into_raw(Box::new(IpasirSolver {
         solver: Solver::new(opts),
         clause: Vec::new(),
+        callbacks: CCallbacks::default(),
     }))
     .cast()
 }
@@ -84,7 +115,8 @@ pub unsafe extern "C" fn ipasir_assume(s: *mut c_void, lit: i32) {
 /// `s` must be a valid solver handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ipasir_solve(s: *mut c_void) -> c_int {
-    match unsafe { get(s) }.solver.solve() {
+    let s = unsafe { get(s) };
+    match s.solver.solve_with(&mut s.callbacks) {
         SolveResult::Sat => 10,
         SolveResult::Unsat => 20,
         SolveResult::Unknown => 0,
@@ -109,13 +141,6 @@ pub unsafe extern "C" fn ipasir_failed(s: *mut c_void, lit: i32) -> c_int {
     unsafe { get(s) }.solver.failed(lit) as c_int
 }
 
-/// Opaque user pointer passed back to C callbacks.
-#[derive(Clone, Copy)]
-struct State(*mut c_void);
-// SAFETY: IPASIR callbacks are only invoked by the thread calling
-// `ipasir_solve`; the caller is responsible for the state it passes.
-unsafe impl Send for State {}
-
 /// Set a callback polled during search; a non-zero result stops the search.
 ///
 /// # Safety
@@ -126,14 +151,7 @@ pub unsafe extern "C" fn ipasir_set_terminate(
     state: *mut c_void,
     terminate: Option<extern "C" fn(*mut c_void) -> c_int>,
 ) {
-    let state = State(state);
-    let callback = terminate.map(|f| -> crate::incremental::TerminateFn {
-        Box::new(move || {
-            let state = state;
-            f(state.0) != 0
-        })
-    });
-    unsafe { get(s) }.solver.set_terminate(callback);
+    unsafe { get(s) }.callbacks.terminate = terminate.map(|f| (state, f));
 }
 
 /// Set a callback receiving learned clauses up to `max_length` literals
@@ -148,18 +166,5 @@ pub unsafe extern "C" fn ipasir_set_learn(
     max_length: c_int,
     learn: Option<extern "C" fn(*mut c_void, *mut i32)>,
 ) {
-    let state = State(state);
-    let callback = learn.map(|f| -> crate::incremental::LearnFn {
-        let mut buffer: Vec<i32> = Vec::new();
-        Box::new(move |clause: &[i32]| {
-            let state = state;
-            buffer.clear();
-            buffer.extend_from_slice(clause);
-            buffer.push(0);
-            f(state.0, buffer.as_mut_ptr());
-        })
-    });
-    unsafe { get(s) }
-        .solver
-        .set_learn(max_length.max(0) as usize, callback);
+    unsafe { get(s) }.callbacks.learn = learn.map(|f| (state, max_length.max(0) as usize, f));
 }

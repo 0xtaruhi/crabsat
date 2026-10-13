@@ -1,8 +1,6 @@
 use crabsat::{Options, Proof, SolveResult, Solver, dimacs};
 use std::io::{self, Write};
 use std::process::exit;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 fn usage() -> String {
     format!(
@@ -28,7 +26,12 @@ fn die(msg: &str) -> ! {
 }
 
 fn main() {
-    let mut opts = Options::default();
+    // One-shot solving: no incremental mode (enables bounded variable
+    // addition and saves the memory of the full extension stack).
+    let mut opts = Options {
+        incremental: false,
+        ..Options::default()
+    };
     let mut files: Vec<String> = Vec::new();
     let mut witness = true;
     let mut strict = false;
@@ -130,13 +133,11 @@ fn main() {
         solver.seconds()
     ));
 
-    let flag = Arc::new(AtomicBool::new(false));
-    solver.set_terminate_flag(flag.clone());
     if let Some(t) = time_limit {
-        let flag = flag.clone();
+        let interrupter = solver.interrupter();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs_f64(t));
-            flag.store(true, Ordering::Relaxed);
+            interrupter.interrupt();
         });
     }
     solver.set_conflict_limit(conflicts);
@@ -148,12 +149,7 @@ fn main() {
         (r.result, r.model)
     } else {
         let res = solver.solve();
-        let model = if res == SolveResult::Sat {
-            solver.model()
-        } else {
-            Vec::new()
-        };
-        (res, model)
+        (res, solver.model().to_vec())
     };
 
     let stdout = io::stdout();

@@ -149,11 +149,11 @@ impl Solver {
 
     fn limit_hit(&self) -> bool {
         self.limits
-            .conflicts
+            .conflicts_end
             .is_some_and(|l| self.stats.conflicts >= l)
             || self
                 .limits
-                .decisions
+                .decisions_end
                 .is_some_and(|l| self.stats.decisions >= l)
     }
 
@@ -246,6 +246,12 @@ impl Solver {
     }
 
     pub(crate) fn decide_phase(&self, v: Var) -> i8 {
+        if self.incremental.any_forced {
+            let forced = self.forced_phase(v);
+            if forced != 0 {
+                return forced;
+            }
+        }
         let initial: i8 = if self.opts.phase { 1 } else { -1 };
         let use_target = match self.opts.target {
             0 => false,

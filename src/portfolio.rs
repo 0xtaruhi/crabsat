@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 /// Result of [`Solver::solve_portfolio`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortfolioResult {
+    /// The result of the winning member.
     pub result: SolveResult,
     /// Model (DIMACS literals of all variables) if satisfiable.
     pub model: Vec<i32>,
@@ -61,8 +62,8 @@ fn diversify(base: &Options, i: usize) -> Options {
 impl Solver {
     /// Solve with `threads` diversified solvers: `self` and `threads - 1`
     /// new solvers built from `clauses`, which must be the clauses added to
-    /// `self`.  The conflict limit and the termination flag of `self` apply
-    /// to all members.
+    /// `self`.  The conflict limit of `self` applies to all members, and an
+    /// interrupt of `self` stops all of them.
     pub fn solve_portfolio(&mut self, clauses: &[Vec<i32>], threads: usize) -> PortfolioResult {
         let vars = self.ext.vars;
         let flag = self
@@ -89,11 +90,7 @@ impl Solver {
         };
         let solve = |s: &mut Solver| {
             let res = s.solve();
-            let model = if res == SolveResult::Sat {
-                s.model()
-            } else {
-                Vec::new()
-            };
+            let model = s.model().to_vec();
             (res, model)
         };
         self.sharing.pool = Some(shared.clone());
@@ -127,6 +124,7 @@ impl Solver {
             }
         });
         self.sharing.pool = None;
+        self.terminate = None;
         result.into_inner().unwrap().unwrap_or(PortfolioResult {
             result: SolveResult::Unknown,
             model: Vec::new(),
