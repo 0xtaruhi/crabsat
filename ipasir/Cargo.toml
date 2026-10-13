@@ -1,0 +1,14 @@
+[package]
+name = "crabsat-ipasir"
+version = "0.1.0"
+edition = "2024"
+description = "IPASIR C library (static and shared) of the crabsat SAT solver"
+license = "MIT"
+repository = "https://github.com/0xtaruhi/crabsat"
+
+[lib]
+name = "crabsat_ipasir"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+crabsat = { path = ".." }

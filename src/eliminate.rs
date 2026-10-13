@@ -169,7 +169,9 @@ impl Solver {
         let occlim = self.opts.eliminateocclim as f64;
         let mut scored: Vec<(f64, Var)> = Vec::new();
         for v in 0..self.vars as Var {
-            if self.flags[v as usize] & (ELIMINATE | ELIMINATED) != ELIMINATE {
+            if self.flags[v as usize] & (ELIMINATE | ELIMINATED | crate::incremental::FROZEN)
+                != ELIMINATE
+            {
                 continue;
             }
             let pos = Lit::new(v, false);
@@ -547,7 +549,13 @@ impl Solver {
             self.occ_lits(lit, occ, &mut lits);
             self.push_extension(lit, &lits);
         }
-        if !neg.occs.is_empty() {
+        if self.opts.incremental {
+            // Keep all clauses so that the variable can be reactivated.
+            for &occ in &neg.occs {
+                self.occ_lits(!lit, occ, &mut lits);
+                self.push_extension(!lit, &lits);
+            }
+        } else if !neg.occs.is_empty() {
             self.push_extension(!lit, &[!lit]);
         }
         for (side_lit, side) in [(lit, &pos), (!lit, &neg)] {

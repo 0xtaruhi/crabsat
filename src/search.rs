@@ -47,7 +47,12 @@ impl Solver {
                 self.iterating = false;
                 self.report('i');
             } else if self.unassigned == 0 {
-                break SolveResult::Sat;
+                // Remaining assumptions are already assigned (true or false).
+                if self.level as usize >= self.assumptions.len() {
+                    break SolveResult::Sat;
+                } else if !self.decide() {
+                    break SolveResult::Unsat;
+                }
             } else if self.terminated() || self.limit_hit() {
                 break SolveResult::Unknown;
             } else if self.level == 0
@@ -75,8 +80,9 @@ impl Solver {
                 if !self.eliminate() {
                     break SolveResult::Unsat;
                 }
-            } else {
-                self.decide();
+            } else if !self.decide() {
+                // A falsified assumption.
+                break SolveResult::Unsat;
             }
         };
         self.account_mode_time();
@@ -128,14 +134,16 @@ impl Solver {
             return Some(SolveResult::Unsat);
         }
         self.apply_initial_order();
-        // Kissat tries lucky assignments before and after preprocessing.
-        if self.opts.luckyearly && self.lucky_early() {
+        // Kissat tries lucky assignments before and after preprocessing
+        // (not with assumptions, which lucky assignments ignore).
+        let lucky = self.assumptions.is_empty();
+        if lucky && self.opts.luckyearly && self.lucky_early() {
             return Some(SolveResult::Sat);
         }
         if !self.preprocess() {
             return Some(SolveResult::Unsat);
         }
-        if self.opts.luckylate && self.lucky() {
+        if lucky && self.opts.luckylate && self.lucky() {
             return Some(SolveResult::Sat);
         }
         None
@@ -266,11 +274,16 @@ impl Solver {
         res
     }
 
-    fn decide(&mut self) {
+    /// Returns false if an assumption is falsified.
+    fn decide(&mut self) -> bool {
+        if let Some(ok) = self.decide_assumption() {
+            return ok;
+        }
         self.stats.decisions += 1;
         let v = self.next_decision_variable();
         let phase = self.decide_phase(v);
         self.assign_decision(Lit::new(v, phase < 0));
+        true
     }
 
     pub fn update_scores(&mut self) {
@@ -324,7 +337,8 @@ impl Solver {
             return 0;
         }
         let next = self.next_decision_variable();
-        let mut res = 0;
+        // Assumption levels are always kept.
+        let mut res = (self.assumptions.len() as u32).min(self.level);
         if self.stable {
             let limit = self.heap.score[next as usize];
             while res < self.level {

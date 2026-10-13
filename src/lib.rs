@@ -14,6 +14,8 @@ pub mod ema;
 pub mod factor;
 pub mod fxhash;
 pub mod heap;
+pub mod incremental;
+pub mod ipasir;
 pub mod kitten;
 pub mod lucky;
 pub mod options;

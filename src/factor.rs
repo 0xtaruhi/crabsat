@@ -43,7 +43,7 @@ struct Factoring {
 
 impl Solver {
     fn factoring_due(&self) -> bool {
-        if !self.opts.factor {
+        if !self.opts.factor || self.opts.incremental {
             return false;
         }
         let active = (self.vars as u64 - self.eliminated as u64).max(1);

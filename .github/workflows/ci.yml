@@ -19,8 +19,14 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      - run: cargo clippy --release --all-targets -- -D warnings
+      - run: cargo clippy --release --workspace --all-targets -- -D warnings
       - run: cargo test --release
+      - name: IPASIR C example
+        run: |
+          cargo build --release -p crabsat-ipasir
+          cc -Wall -Iinclude examples/ipasir_example.c \
+            target/release/libcrabsat_ipasir.a -lpthread -ldl -lm -o ipasir_example
+          ./ipasir_example
 
   fuzz:
     name: Differential fuzzing (models and DRAT proofs)

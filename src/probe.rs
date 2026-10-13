@@ -232,6 +232,15 @@ impl Solver {
         if repr.is_empty() {
             return true;
         }
+        // Frozen variables (of assumptions) are not substituted.
+        let mut repr = repr;
+        for v in 0..self.vars as Var {
+            if self.flags[v as usize] & crate::incremental::FROZEN != 0 {
+                let pos = Lit::new(v, false);
+                repr[pos.idx()] = pos;
+                repr[(!pos).idx()] = !pos;
+            }
+        }
         let mut substituted: Vec<Var> = Vec::new();
         for v in 0..self.vars as Var {
             let pos = Lit::new(v, false);

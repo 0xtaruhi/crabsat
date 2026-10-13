@@ -97,7 +97,7 @@ Each milestone moves on once its definition of done (DoD) is met.
 
 ### M5: Beyond Kissat
 
-- [ ] IPASIR compatible incremental API (assumptions)
+- [x] IPASIR compatible incremental API (assumptions)
 - [x] Parallel portfolio (`--threads=N`, sharing of root-level units)
 - [x] Extended clause sharing (binary clauses, low glue learned clauses)
 
@@ -217,3 +217,22 @@ and perturbs the later search).
 
 (Rows were measured under different machine loads; only rows measured
 simultaneously are directly comparable.)
+
+### 2026-10-13: Incremental API (IPASIR)
+
+- `Solver::assume` / `failed` / `val` and the IPASIR C functions
+  (`crabsat-ipasir` crate, `libcrabsat_ipasir.a` / `.so`,
+  `include/ipasir.h`), with terminate and learn callbacks.
+- Assumptions are decided first, one per decision level; assumptions that are
+  already true get a decision level without assignment.  A falsified
+  assumption is analyzed back through the reasons to the assumptions it
+  depends on (failed assumptions).  Restarts keep the assumption levels.
+- Variables of assumptions are frozen during a call (no elimination, no
+  substitution).  In incremental mode, elimination saves all removed clauses
+  on the extension stack (not only the witness unit for the negative side)
+  and factor is disabled.  When a new clause or assumption mentions an
+  eliminated or substituted variable, its saved clauses are added back
+  transitively and the variable becomes active again (as in CaDiCaL).
+- Tests: random sequences of clause additions, assumptions and solve calls
+  checked against fresh solvers (results, models, failed assumptions as
+  unsatisfiable cores), also with aggressive elimination and compaction.

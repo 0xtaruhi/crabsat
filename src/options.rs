@@ -104,6 +104,7 @@ options! {
     restartmargin: u64 = 10, "fast/slow margin in percent";
     restartreusetrail: bool = true, "restarts tries to reuse trail";
     seed: u64 = 0, "random seed";
+    incremental: bool = false, "incremental mode (keep all eliminated clauses, no factor)";
     share: bool = true, "share learned clauses in portfolio mode";
     portfolio: u32 = 1, "portfolio diversification table (0=old, 1=default)";
     shareglue: u32 = 2, "maximum glue of shared clauses";

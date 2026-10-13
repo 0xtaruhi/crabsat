@@ -789,6 +789,11 @@ impl Solver {
         let not_uip = self.clause[0];
         let size = self.clause.len();
         let glue = self.levels.len() as u32;
+        if self.learn_cb.is_some() {
+            let lits = std::mem::take(&mut self.clause);
+            self.learn_callback(&lits);
+            self.clause = lits;
+        }
         if self.shared.is_some() && size >= 2 {
             let lits = std::mem::take(&mut self.clause);
             self.export_clause(&lits, glue);

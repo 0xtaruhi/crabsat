@@ -19,6 +19,9 @@ A high-performance CDCL SAT solver written in Rust, following the design of
 - **DRAT proofs** (binary or text) for unsatisfiable formulas.
 - **Parallel portfolio** (`--threads=N`) with diversified solvers sharing
   units and short low-glue learned clauses.
+- **Incremental solving** through the [IPASIR](https://github.com/biotomas/ipasir)
+  C interface and a Rust API (assumptions, failed assumptions, clauses added
+  between calls, terminate and learn callbacks).
 
 ## Building
 
@@ -58,10 +61,43 @@ crabsat or Kissat 4.0.4 within 120 s, 60 s time limit, same machine load):
 
 See [ROADMAP.md](ROADMAP.md) for the roadmap and development log.
 
+## Incremental API
+
+Rust:
+
+```rust
+use crabsat::{Options, SolveResult, Solver};
+
+let mut s = Solver::new(Options { incremental: true, ..Options::default() });
+s.add_clause_dimacs(&[1, 2]);
+s.add_clause_dimacs(&[-1, 2]);
+assert_eq!(s.solve(), SolveResult::Sat);
+assert_eq!(s.val(2), 2);
+s.assume(-2);
+assert_eq!(s.solve(), SolveResult::Unsat);
+assert!(s.failed(-2));
+```
+
+C (IPASIR, header [`include/ipasir.h`](include/ipasir.h)):
+
+```sh
+cargo build --release -p crabsat-ipasir
+cc -Iinclude examples/ipasir_example.c target/release/libcrabsat_ipasir.a \
+    -lpthread -ldl -lm -o example
+```
+
+`target/release/libcrabsat_ipasir.so` is built as well.  All inprocessing
+stays enabled in incremental mode except bounded variable addition: variables
+of assumptions are frozen during a call, and variables removed by elimination
+or substitution are reactivated (with their saved clauses) when later clauses
+or assumptions mention them.
+
 ## Testing
 
 ```sh
 cargo test --release
+# longer randomized tests of the incremental API
+CRABSAT_INCREMENTAL_RUNS=20000 cargo test --release --test incremental
 # differential fuzzing against Kissat with model and DRAT proof checking
 python3 scripts/fuzz.py --crabsat target/release/crabsat \
     --ref /path/to/kissat --drat-trim /path/to/drat-trim -n 1000

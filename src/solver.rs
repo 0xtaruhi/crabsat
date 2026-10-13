@@ -222,6 +222,14 @@ pub struct Solver {
     pub last_share: u64,
     /// Preprocessing (and the lucky phases) already ran.
     pub presolved: bool,
+    /// Assumptions (external literals) for the next solve call.
+    pub assumptions: Vec<Lit>,
+    pub failed_assumptions: Vec<Lit>,
+    /// Model of the last satisfiable call in incremental mode.
+    pub last_model: Vec<i32>,
+    pub terminate_cb: Option<crate::incremental::TerminateCallback>,
+    pub learn_cb: Option<crate::incremental::LearnCallback>,
+    pub terminate_calls: std::cell::Cell<u32>,
     pub root_log: Option<Vec<Lit>>,
     /// Variables in order of their first occurrence in added clauses.
     pub first_seen: Vec<Var>,
@@ -316,6 +324,12 @@ impl Solver {
             imported_clauses: 0,
             last_share: 0,
             presolved: false,
+            assumptions: Vec::new(),
+            failed_assumptions: Vec::new(),
+            last_model: Vec::new(),
+            terminate_cb: None,
+            learn_cb: None,
+            terminate_calls: std::cell::Cell::new(0),
             root_log: std::env::var_os("CRABSAT_CHECK_DB").map(|_| Vec::new()),
             first_seen: Vec::new(),
             seen: Vec::new(),
@@ -378,7 +392,7 @@ impl Solver {
     }
 
     /// Make sure internal variables `0..vars` exist.
-    fn grow_internal(&mut self, vars: usize) {
+    pub(crate) fn grow_internal(&mut self, vars: usize) {
         if vars <= self.vars {
             return;
         }
@@ -686,7 +700,7 @@ impl Solver {
         let mut lits: Vec<Lit> = Vec::with_capacity(dimacs.len());
         for &d in dimacs {
             let e = Lit::from_dimacs(d);
-            self.reserve_vars(e.vidx() + 1);
+            self.prepare_external(e.vidx());
             match self.internal(e) {
                 Some(l) => lits.push(l),
                 None => {
@@ -869,7 +883,18 @@ impl Solver {
     }
 
     pub fn solve(&mut self) -> SolveResult {
+        if self.level > 0 {
+            self.backtrack_without_updating_phases(0);
+        }
+        self.start_assumptions();
         let res = self.search();
+        if res == SolveResult::Sat && self.opts.incremental {
+            self.last_model = self.model();
+        }
+        if res != SolveResult::Unsat || self.inconsistent {
+            self.failed_assumptions.clear();
+        }
+        self.end_assumptions();
         if let Some(log) = &self.root_log {
             for &l in log {
                 if self.value(l) <= 0 || self.flags[l.vidx()] & ELIMINATED != 0 {
@@ -920,6 +945,7 @@ impl Solver {
         self.terminate
             .as_ref()
             .is_some_and(|t| t.load(std::sync::atomic::Ordering::Relaxed))
+            || self.terminate_callback()
     }
 
     pub fn seconds(&self) -> f64 {
