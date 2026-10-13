@@ -64,7 +64,7 @@ impl Solver {
             return false;
         }
         self.stats.eliminations += 1;
-        let before = self.eliminated;
+        let before = self.stats.eliminated;
         self.enter_dense_mode();
         if !self.inconsistent {
             self.eliminate_variables();
@@ -81,8 +81,8 @@ impl Solver {
             println!(
                 "c [eliminate-{}] eliminated {} variables (total {})",
                 self.stats.eliminations,
-                self.eliminated - before,
-                self.eliminated
+                self.stats.eliminated - before,
+                self.stats.eliminated
             );
         }
         self.report('e');
@@ -318,7 +318,7 @@ impl Solver {
             None
         };
         // Other literal pairs of the ternary clauses on the negative side.
-        let mut neg_pairs: std::collections::HashMap<(Lit, Lit), usize> = Default::default();
+        let mut neg_pairs: crate::fxhash::FxHashMap<(Lit, Lit), usize> = Default::default();
         for (k, &occ) in neg.occs.iter().enumerate() {
             if let Some(pair) = ternary(self, occ, !lit) {
                 neg_pairs.insert(pair, k);
@@ -372,7 +372,7 @@ impl Solver {
     fn find_xor_gate(&mut self, _lit: Lit, pos: &mut Side, neg: &mut Side) -> bool {
         let max_size = self.opts.congruencexorarity as usize + 1;
         // (sorted variable set) -> (side, index, negation mask) of clauses.
-        let mut groups: std::collections::HashMap<Vec<u32>, Vec<(bool, usize, u32)>> =
+        let mut groups: crate::fxhash::FxHashMap<Vec<u32>, Vec<(bool, usize, u32)>> =
             Default::default();
         for (side_is_pos, side) in [(true, &*pos), (false, &*neg)] {
             for (k, &occ) in side.occs.iter().enumerate() {

@@ -11,7 +11,7 @@ use crate::arena::CRef;
 use crate::solver::{Solver, ELIMINATED};
 use crate::types::Lit;
 use crate::watch::{self, Watch};
-use std::collections::HashMap;
+use crate::fxhash::{FxHashMap as HashMap, FxHashSet};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Kind {
@@ -108,7 +108,11 @@ impl Solver {
             return true;
         }
         self.stats.congruences += 1;
+        let t = std::time::Instant::now();
         let gates = self.extract_gates();
+        if self.verbose(3) {
+            println!("c [congruence] extract total {:.2}s", t.elapsed().as_secs_f64());
+        }
         if self.verbose(2) {
             let count = |k: Kind| gates.iter().filter(|g| g.kind == k).count();
             println!(
@@ -123,7 +127,11 @@ impl Solver {
             self.delay_congruence.bump();
             return true;
         }
+        let t = std::time::Instant::now();
         let equivalences = self.close_congruences(gates);
+        if self.verbose(3) {
+            println!("c [congruence] closure {:.2}s", t.elapsed().as_secs_f64());
+        }
         let active = (self.vars as u32 - self.eliminated).max(1);
         if (equivalences as f64) / (active as f64) < 0.001 {
             self.delay_congruence.bump();
@@ -140,7 +148,12 @@ impl Solver {
             return true;
         }
         self.stats.congruent += equivalences as u64;
-        self.substitute()
+        let t = std::time::Instant::now();
+        let ok = self.substitute();
+        if self.verbose(3) {
+            println!("c [congruence] substitute {:.2}s", t.elapsed().as_secs_f64());
+        }
+        ok
     }
 
     // ------------------------------------------------------------------
@@ -150,7 +163,7 @@ impl Solver {
     /// `(!a | b)` (or `(!a | c)`) give `(b | c)`, which subsumes the ternary
     /// clause (Kissat `extract_binaries`).  Returns the number extracted.
     fn extract_binaries(&mut self) -> usize {
-        let mut bins: std::collections::HashSet<(Lit, Lit)> = Default::default();
+        let mut bins: FxHashSet<(Lit, Lit)> = Default::default();
         let key = |a: Lit, b: Lit| if a < b { (a, b) } else { (b, a) };
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
@@ -201,7 +214,11 @@ impl Solver {
 
     fn extract_gates(&mut self) -> Vec<Gate> {
         if self.opts.congruencebinaries {
+            let t = std::time::Instant::now();
             let n = self.extract_binaries();
+            if self.verbose(3) {
+                println!("c [congruence] binaries {:.2}s", t.elapsed().as_secs_f64());
+            }
             if self.verbose(2) {
                 println!("c [congruence-{}] extracted {} binaries", self.stats.congruences, n);
             }
@@ -250,13 +267,25 @@ impl Solver {
         }
         let mut gates = Vec::new();
         if self.opts.congruenceands {
+            let t = std::time::Instant::now();
             self.extract_and_gates(&occs, &mut gates);
+            if self.verbose(3) {
+                println!("c [congruence] extract_and_gates {:.2}s", t.elapsed().as_secs_f64());
+            }
         }
         if self.opts.congruenceites {
+            let t = std::time::Instant::now();
             self.extract_ite_gates(&occs, &mut gates);
+            if self.verbose(3) {
+                println!("c [congruence] extract_ite_gates {:.2}s", t.elapsed().as_secs_f64());
+            }
         }
         if self.opts.congruencexors {
+            let t = std::time::Instant::now();
             self.extract_xor_gates(&occs, &mut gates);
+            if self.verbose(3) {
+                println!("c [congruence] extract_xor_gates {:.2}s", t.elapsed().as_secs_f64());
+            }
         }
         gates
     }
@@ -307,7 +336,7 @@ impl Solver {
     /// `(!c | !t | lhs) (!c | t | !lhs) (c | !e | lhs) (c | e | !lhs)`.
     fn extract_ite_gates(&mut self, occs: &[Vec<CRef>], gates: &mut Vec<Gate>) {
         // Hash set of ternary clauses.
-        let mut ternary: std::collections::HashSet<[Lit; 3]> = std::collections::HashSet::new();
+        let mut ternary: FxHashSet<[Lit; 3]> = Default::default();
         let key = |mut a: [Lit; 3]| {
             a.sort_unstable();
             a
@@ -322,7 +351,7 @@ impl Solver {
             c = next;
         }
         let has = |a: Lit, b: Lit, c: Lit| ternary.contains(&key([a, b, c]));
-        let mut seen: std::collections::HashSet<(Lit, Lit, Lit, Lit)> = Default::default();
+        let mut seen: FxHashSet<(Lit, Lit, Lit, Lit)> = Default::default();
         for idx in 0..2 * self.vars {
             let lhs = Lit(idx as u32);
             if !self.active_lit(lhs) {
@@ -357,7 +386,19 @@ impl Solver {
                         if !has(cond, e, !lhs) {
                             continue;
                         }
-                        if seen.insert((lhs, cond, then, e)) {
+                        // Canonical form: ITE(c,t,e) = ITE(!c,e,t), and
+                        // !lhs = ITE(c,!t,!e).
+                        let (mut kc, mut kt, mut ke, mut kl) = (cond, then, e, lhs);
+                        if kc.negated() {
+                            kc = !kc;
+                            std::mem::swap(&mut kt, &mut ke);
+                        }
+                        if kt.negated() {
+                            kt = !kt;
+                            ke = !ke;
+                            kl = !kl;
+                        }
+                        if seen.insert((kl, kc, kt, ke)) {
                             gates.push(Gate {
                                 kind: Kind::Ite,
                                 lhs,
@@ -375,27 +416,45 @@ impl Solver {
     /// the same parity of negations.  Every variable can be the output.
     fn extract_xor_gates(&mut self, _occs: &[Vec<CRef>], gates: &mut Vec<Gate>) {
         let max_size = self.opts.congruencexorarity as usize + 1;
-        // Group clauses by variable set.
-        let mut groups: HashMap<Vec<u32>, Vec<u32>> = HashMap::new();
+        // Group clauses by variable set: collect (sorted variables, sign
+        // mask) pairs with fixed size keys and sort them.
+        let mut entries: Vec<([u32; 8], u32)> = Vec::new();
+        let max_size = max_size.min(8);
         let mut c = 0;
         while (c as usize) < self.arena.len() {
             let next = self.arena.next(c);
             if !self.arena.garbage(c) && !self.arena.redundant(c) {
                 let lits = self.arena.lits(c);
-                if lits.len() <= max_size && lits.iter().all(|&l| self.value(l) == 0) {
-                    let mut vars: Vec<u32> = lits.iter().map(|l| l.var()).collect();
-                    vars.sort_unstable();
-                    // Sign pattern as bit mask in sorted variable order.
-                    let mut sorted = lits.to_vec();
-                    sorted.sort_unstable_by_key(|l| l.var());
-                    let mask = sorted
-                        .iter()
-                        .enumerate()
-                        .fold(0u32, |m, (i, l)| m | ((l.negated() as u32) << i));
-                    groups.entry(vars).or_default().push(mask);
+                if lits.len() >= 3 && lits.len() <= max_size && lits.iter().all(|&l| self.value(l) == 0) {
+                    let mut sorted = [Lit::INVALID; 8];
+                    sorted[..lits.len()].copy_from_slice(lits);
+                    sorted[..lits.len()].sort_unstable_by_key(|l| l.var());
+                    let mut key = [u32::MAX; 8];
+                    let mut mask = 0u32;
+                    for (i, l) in sorted[..lits.len()].iter().enumerate() {
+                        key[i] = l.var();
+                        mask |= (l.negated() as u32) << i;
+                    }
+                    entries.push((key, mask));
                 }
             }
             c = next;
+        }
+        entries.sort_unstable();
+        let mut groups: Vec<(Vec<u32>, Vec<u32>)> = Vec::new();
+        let mut i = 0;
+        while i < entries.len() {
+            let mut j = i + 1;
+            while j < entries.len() && entries[j].0 == entries[i].0 {
+                j += 1;
+            }
+            let key = entries[i].0;
+            let k = key.iter().take_while(|&&v| v != u32::MAX).count();
+            if j - i >= 1usize << (k - 1) {
+                let masks: Vec<u32> = entries[i..j].iter().map(|e| e.1).collect();
+                groups.push((key[..k].to_vec(), masks));
+            }
+            i = j;
         }
         for (vars, masks) in groups {
             let k = vars.len();
@@ -534,7 +593,7 @@ impl Solver {
 
     fn close_congruences(&mut self, mut gates: Vec<Gate>) -> usize {
         let mut uf = UnionFind::new(self.vars);
-        let mut table: HashMap<(Kind, Vec<Lit>), usize> = HashMap::new();
+        let mut table: HashMap<(Kind, Vec<Lit>), usize> = Default::default();
         let mut gates_of_var: Vec<Vec<usize>> = vec![Vec::new(); self.vars];
         for (i, g) in gates.iter().enumerate() {
             for &l in &g.rhs {

@@ -9,6 +9,7 @@ pub mod dimacs;
 pub mod ema;
 pub mod eliminate;
 pub mod factor;
+pub mod fxhash;
 pub mod heap;
 pub mod kitten;
 pub mod lucky;

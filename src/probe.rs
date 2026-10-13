@@ -77,6 +77,24 @@ impl Solver {
     /// clauses again.  Returns false on inconsistency.
     pub fn resync_watches(&mut self) -> bool {
         debug_assert_eq!(self.level, 0);
+        if self.verbose(4) {
+            let mut seen = std::collections::HashSet::new();
+            let mut dups = 0;
+            let mut total = 0;
+            let mut c = 0;
+            while (c as usize) < self.arena.len() {
+                if !self.arena.garbage(c) && !self.arena.redundant(c) {
+                    let mut l: Vec<u32> = self.arena.lits(c).iter().map(|l| l.0).collect();
+                    l.sort_unstable();
+                    total += 1;
+                    if !seen.insert(l) {
+                        dups += 1;
+                    }
+                }
+                c = self.arena.next(c);
+            }
+            println!("c [resync] {dups} duplicated of {total} irredundant large clauses");
+        }
         let mut c = 0;
         while (c as usize) < self.arena.len() && !self.inconsistent {
             let next = self.arena.next(c);

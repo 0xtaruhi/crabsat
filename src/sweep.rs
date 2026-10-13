@@ -124,8 +124,8 @@ impl Solver {
         let max_clauses = self.opts.sweepclauses as usize;
         let mut env = Environment { vars: vec![root], clauses: Vec::new() };
         map[root as usize] = 0;
-        let mut seen_clauses: std::collections::HashSet<CRef> = Default::default();
-        let mut seen_binaries: std::collections::HashSet<(Lit, Lit)> = Default::default();
+        let mut seen_clauses: crate::fxhash::FxHashSet<CRef> = Default::default();
+        let mut seen_binaries: crate::fxhash::FxHashSet<(Lit, Lit)> = Default::default();
         let mut frontier = vec![root];
         'depth: for _ in 0..self.opts.sweepdepth {
             let mut next_frontier = Vec::new();
