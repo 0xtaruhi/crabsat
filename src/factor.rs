@@ -51,7 +51,7 @@ impl Solver {
         log_active <= self.stats.eliminations + self.opts.factordelay
     }
 
-    pub fn factor(&mut self) -> bool {
+    pub(crate) fn factor(&mut self) -> bool {
         let start = std::time::Instant::now();
         let res = self.factor_untimed();
         self.stats.time_factor += start.elapsed().as_secs_f64();
@@ -213,7 +213,7 @@ impl Solver {
 
     fn factor_candidate(&self, lit: Lit) -> bool {
         let v = lit.vidx();
-        self.flags[v] & ELIMINATED == 0
+        !self.flags[v].has(ELIMINATED)
             && self.value(lit) == 0
             && self.factor_flags[v] & (1 << lit.negated() as u8) != 0
     }
@@ -310,7 +310,7 @@ impl Solver {
                         let Watch::Binary(next) = w else { continue };
                         if next.0 >= f.initial
                             || self.marks[next.idx()] & FACTOR != 0
-                            || self.flags[next.vidx()] & ELIMINATED != 0
+                            || self.flags[next.vidx()].has(ELIMINATED)
                             || self.value(next) != 0
                         {
                             continue;
@@ -351,7 +351,7 @@ impl Solver {
                             if !ok || next == Lit::INVALID || next.0 >= f.initial {
                                 continue;
                             }
-                            if self.flags[next.vidx()] & ELIMINATED != 0 || self.value(next) != 0 {
+                            if self.flags[next.vidx()].has(ELIMINATED) || self.value(next) != 0 {
                                 continue;
                             }
                             self.marks[next.idx()] |= NOUNTED;

@@ -3,6 +3,7 @@
 //! `backbone.c`) and clause vivification (`vivify.c`).
 
 use crate::arena::{CRef, INVALID_REF};
+use crate::flags::FROZEN;
 use crate::simplify::Simplified;
 use crate::solver::{ANALYZED, BINARY, Conflict, DECISION_REASON, ELIMINATED, Solver};
 use crate::stats::nlogpown;
@@ -10,14 +11,14 @@ use crate::types::{Lit, Var};
 use crate::watch::{self, Watch};
 
 impl Solver {
-    pub fn probing_due(&self) -> bool {
+    pub(crate) fn probing_due(&self) -> bool {
         self.opts.simplify
             && self.opts.probe
             && self.last_reduce_conflicts != self.stats.conflicts
             && self.limits.probe_conflicts < self.stats.conflicts
     }
 
-    pub fn probe(&mut self) -> bool {
+    pub(crate) fn probe(&mut self) -> bool {
         let start = std::time::Instant::now();
         let res = self.probe_untimed();
         self.stats.time_probe += start.elapsed().as_secs_f64();
@@ -54,7 +55,7 @@ impl Solver {
     }
 
     /// Initial preprocessing before search (Kissat `preprocess.c`).
-    pub fn preprocess(&mut self) -> bool {
+    pub(crate) fn preprocess(&mut self) -> bool {
         if !self.opts.preprocess || !self.opts.simplify || !self.opts.probe {
             return true;
         }
@@ -75,7 +76,7 @@ impl Solver {
 
     /// At the root: simplify all clauses, collect the arena and watch all
     /// clauses again.  Returns false on inconsistency.
-    pub fn resync_watches(&mut self) -> bool {
+    pub(crate) fn resync_watches(&mut self) -> bool {
         debug_assert_eq!(self.level, 0);
         if self.verbose(4) {
             let mut seen = std::collections::HashSet::new();
@@ -146,7 +147,7 @@ impl Solver {
             if index[root.idx()] != u32::MAX || self.value(root) != 0 {
                 continue;
             }
-            if self.flags[root.vidx()] & ELIMINATED != 0 {
+            if self.flags[root.vidx()].has(ELIMINATED) {
                 continue;
             }
             self.implied_by_binaries(root, &mut succ);
@@ -224,7 +225,7 @@ impl Solver {
     }
 
     /// Substitute equivalent literals.  Returns false on inconsistency.
-    pub fn substitute(&mut self) -> bool {
+    pub(crate) fn substitute(&mut self) -> bool {
         debug_assert_eq!(self.level, 0);
         let Some(repr) = self.equivalence_classes() else {
             return false;
@@ -235,7 +236,7 @@ impl Solver {
         // Frozen variables (of assumptions) are not substituted.
         let mut repr = repr;
         for v in 0..self.vars as Var {
-            if self.flags[v as usize] & crate::incremental::FROZEN != 0 {
+            if self.flags[v as usize].has(FROZEN) {
                 let pos = Lit::new(v, false);
                 repr[pos.idx()] = pos;
                 repr[(!pos).idx()] = !pos;
@@ -356,7 +357,7 @@ impl Solver {
             let r = repr[l.idx()];
             self.push_extension(l, &[l, !r]);
             self.push_extension(!l, &[!l, r]);
-            self.flags[v as usize] |= ELIMINATED;
+            self.flags[v as usize].insert(ELIMINATED);
             self.eliminated += 1;
             self.unassigned -= 1;
             self.queue.dequeue(v);
@@ -420,7 +421,7 @@ impl Solver {
         let mut candidates: Vec<Lit> = Vec::new();
         for idx in 0..2 * self.vars {
             let lit = Lit(idx as u32);
-            if self.value(lit) != 0 || self.flags[lit.vidx()] & ELIMINATED != 0 {
+            if self.value(lit) != 0 || self.flags[lit.vidx()].has(ELIMINATED) {
                 continue;
             }
             let has_binary =
@@ -451,7 +452,7 @@ impl Solver {
         true
     }
 
-    pub fn effort_limit_from(&self, last_ticks: u64, effort: u64) -> u64 {
+    pub(crate) fn effort_limit_from(&self, last_ticks: u64, effort: u64) -> u64 {
         let reference = self.stats.search_ticks - last_ticks;
         let reference = reference.max(1_000_000 * self.opts.mineffort);
         (reference as f64 * effort as f64 * 1e-3) as u64
@@ -730,7 +731,7 @@ impl Solver {
             if a.level == 0 || a.has(ANALYZED) {
                 continue;
             }
-            self.assigned[v as usize].flags |= ANALYZED;
+            self.assigned[v as usize].flags.insert(ANALYZED);
             marked.push(v);
             if a.reason == DECISION_REASON {
                 // The literal on the trail is the decision itself.
@@ -744,7 +745,7 @@ impl Solver {
             }
         }
         for v in marked {
-            self.assigned[v as usize].flags &= !ANALYZED;
+            self.assigned[v as usize].flags.remove(ANALYZED);
         }
         decisions
     }
@@ -754,7 +755,7 @@ impl Solver {
     /// Transitive reduction of the binary implication graph (Kissat
     /// `transitive.c`): a binary clause `(!a | b)` is removed if `b` is
     /// reachable from `a` without it.  Reaching `!a` makes `!a` a unit.
-    pub fn transitive_reduction(&mut self) -> bool {
+    pub(crate) fn transitive_reduction(&mut self) -> bool {
         debug_assert_eq!(self.level, 0);
         if !self.opts.transitive {
             return true;
@@ -772,7 +773,7 @@ impl Solver {
                 break;
             }
             let src = Lit(((start + k) % n) as u32);
-            if self.value(src) != 0 || self.flags[src.vidx()] & ELIMINATED != 0 {
+            if self.value(src) != 0 || self.flags[src.vidx()].has(ELIMINATED) {
                 continue;
             }
             // Successors of `src`: binary clauses (!src | dst).

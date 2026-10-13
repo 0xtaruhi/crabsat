@@ -24,7 +24,7 @@ pub enum Simplified {
 impl Solver {
     /// Remove root-falsified literals of `c` and delete it if satisfied.
     /// Must be called at level 0 when `c` is not a reason.
-    pub fn simplify_clause_at_root(&mut self, c: CRef) -> Simplified {
+    pub(crate) fn simplify_clause_at_root(&mut self, c: CRef) -> Simplified {
         debug_assert_eq!(self.level, 0);
         debug_assert!(!self.arena.garbage(c));
         let mut falsified = 0;
@@ -53,8 +53,7 @@ impl Solver {
 
     /// Replace clause `c` by the clause `lits` (a subset of its literals),
     /// producing a binary clause, unit or empty clause if necessary.
-    pub fn strengthen_to(&mut self, c: CRef, lits: &[Lit]) -> Simplified {
-        self.trace("strengthen-from", self.arena.lits(c));
+    pub(crate) fn strengthen_to(&mut self, c: CRef, lits: &[Lit]) -> Simplified {
         if let Some(p) = self.proof.as_mut() {
             p.add(lits);
         }
@@ -97,7 +96,7 @@ impl Solver {
 
     /// Switch to dense mode: connect all irredundant large clauses with full
     /// occurrence lists.  Requires level 0 and complete propagation.
-    pub fn enter_dense_mode(&mut self) {
+    pub(crate) fn enter_dense_mode(&mut self) {
         debug_assert_eq!(self.level, 0);
         debug_assert!(!self.dense);
         self.dense = true;
@@ -117,7 +116,7 @@ impl Solver {
         }
     }
 
-    pub fn connect_occurrences(&mut self, c: CRef) {
+    pub(crate) fn connect_occurrences(&mut self, c: CRef) {
         for i in 0..self.arena.size(c) {
             let lit = self.arena.lits(c)[i];
             watch::push_large(&mut self.watches[lit.idx()], lit, c);
@@ -161,7 +160,7 @@ impl Solver {
 
     /// Leave dense mode: delete redundant clauses with eliminated variables,
     /// simplify all clauses at the root, collect the arena and watch again.
-    pub fn resume_sparse_mode(&mut self) {
+    pub(crate) fn resume_sparse_mode(&mut self) {
         debug_assert!(self.dense);
         self.dense = false;
         if !self.inconsistent {
@@ -179,7 +178,7 @@ impl Solver {
                         .arena
                         .lits(c)
                         .iter()
-                        .any(|l| self.flags[l.vidx()] & ELIMINATED != 0);
+                        .any(|l| self.flags[l.vidx()].has(ELIMINATED));
                 if eliminated {
                     self.mark_garbage(c);
                 } else {
@@ -198,7 +197,7 @@ impl Solver {
 
     /// Unit propagation in dense mode.  Large clauses are connected through
     /// full occurrence lists; returns false on conflict.
-    pub fn dense_propagate(&mut self) -> bool {
+    pub(crate) fn dense_propagate(&mut self) -> bool {
         while self.propagated < self.trail.len() && !self.inconsistent {
             let lit = self.trail[self.propagated];
             self.propagated += 1;
@@ -216,7 +215,7 @@ impl Solver {
                             self.learned_unit(other);
                         }
                     }
-                    watch::Watch::Large(_, c) => {
+                    watch::Watch::Large(c) => {
                         if self.arena.garbage(c) {
                             continue;
                         }

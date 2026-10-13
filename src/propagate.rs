@@ -6,6 +6,7 @@
 //! delayed until the current watch list has been traversed.
 
 use crate::arena::{GARBAGE, HEADER};
+use crate::flags::AssignFlags;
 use crate::solver::{Assigned, BINARY, Conflict, Solver, UNIT_REASON};
 use crate::types::Lit;
 use crate::watch;
@@ -29,7 +30,7 @@ macro_rules! at_mut {
 
 impl Solver {
     /// Propagate all literals on the trail.  Returns a conflict if found.
-    pub fn propagate(&mut self) -> Option<Conflict> {
+    pub(crate) fn propagate(&mut self) -> Option<Conflict> {
         let before = self.propagated;
         let mut conflict = None;
         while self.propagated < self.trail.len() {
@@ -87,9 +88,9 @@ impl Solver {
                 let (reason, flags) = if lvl == 0 {
                     pending_units.push(l);
                     stats.units += 1;
-                    (UNIT_REASON, 0)
+                    (UNIT_REASON, AssignFlags::EMPTY)
                 } else {
-                    ($reason, if $binary { BINARY } else { 0 })
+                    ($reason, if $binary { BINARY } else { AssignFlags::EMPTY })
                 };
                 *at_mut!(values, l.idx()) = 1;
                 *at_mut!(values, (!l).idx()) = -1;

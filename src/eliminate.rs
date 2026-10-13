@@ -3,6 +3,7 @@
 //! `equivalences.c`, `forward.c`).
 
 use crate::arena::CRef;
+use crate::flags::FROZEN;
 use crate::simplify::Simplified;
 use crate::solver::{ELIMINATE, ELIMINATED, SUBSUME, Solver};
 use crate::stats::nlogpown;
@@ -26,14 +27,14 @@ struct Side {
 
 impl Solver {
     /// Kissat's `kissat_scale_delta`: scale intervals by formula size.
-    pub fn scale_delta(&self, delta: u64) -> u64 {
+    pub(crate) fn scale_delta(&self, delta: u64) -> u64 {
         let clauses = self.stats.clauses_irredundant + self.stats.clauses_binary;
         let f = ((clauses + 1 + 9) as f64).log10() - 5.0;
         let ff = 4.5 * f * f + 25.0;
         (ff * delta as f64) as u64
     }
 
-    pub fn eliminating(&self) -> bool {
+    pub(crate) fn eliminating(&self) -> bool {
         if !self.opts.simplify || !self.opts.eliminate {
             return false;
         }
@@ -50,7 +51,7 @@ impl Solver {
             || self.limits.subsume_variables < self.stats.variables_subsume
     }
 
-    pub fn eliminate(&mut self) -> bool {
+    pub(crate) fn eliminate(&mut self) -> bool {
         let start = std::time::Instant::now();
         let res = self.eliminate_untimed();
         self.stats.time_eliminate += start.elapsed().as_secs_f64();
@@ -115,7 +116,7 @@ impl Solver {
                     remain = schedule.len() - k;
                     break;
                 }
-                if self.flags[v as usize] & ELIMINATE == 0 {
+                if !self.flags[v as usize].has(ELIMINATE) {
                     continue;
                 }
                 if self.eliminate_variable(v) {
@@ -153,13 +154,13 @@ impl Solver {
                     (2 * current).min(max_bound)
                 };
                 for f in &mut self.flags {
-                    *f |= ELIMINATE;
+                    f.insert(ELIMINATE);
                 }
                 self.limits.eliminate_variables = 0;
             }
         } else {
             for f in &mut self.flags {
-                *f &= !ELIMINATE;
+                f.remove(ELIMINATE);
             }
         }
     }
@@ -169,9 +170,7 @@ impl Solver {
         let occlim = self.opts.eliminateocclim as f64;
         let mut scored: Vec<(f64, Var)> = Vec::new();
         for v in 0..self.vars as Var {
-            if self.flags[v as usize] & (ELIMINATE | ELIMINATED | crate::incremental::FROZEN)
-                != ELIMINATE
-            {
+            if !self.flags[v as usize].masked(ELIMINATE | ELIMINATED | FROZEN, ELIMINATE) {
                 continue;
             }
             let pos = Lit::new(v, false);
@@ -441,9 +440,9 @@ impl Solver {
 
     /// Try to eliminate variable `v`.
     fn eliminate_variable(&mut self, v: Var) -> bool {
-        self.flags[v as usize] &= !ELIMINATE;
+        self.flags[v as usize].remove(ELIMINATE);
         let pos_lit = Lit::new(v, false);
-        if self.value(pos_lit) != 0 || self.flags[v as usize] & ELIMINATED != 0 {
+        if self.value(pos_lit) != 0 || self.flags[v as usize].has(ELIMINATED) {
             return false;
         }
         let mut pos = Side::default();
@@ -472,45 +471,6 @@ impl Solver {
         let Some(resolvents) = self.resolve(lit, &pos, &neg, gates, bound) else {
             return false;
         };
-        if std::env::var("CRABSAT_TRACE_VAR")
-            .ok()
-            .and_then(|x| x.parse::<u32>().ok())
-            == Some(v + 1)
-        {
-            let show = |s: &Solver, side_lit: Lit, side: &Side| {
-                let mut out = Vec::new();
-                for (k, &occ) in side.occs.iter().enumerate() {
-                    let mut l = Vec::new();
-                    s.occ_lits(side_lit, occ, &mut l);
-                    let d: Vec<String> = l
-                        .iter()
-                        .map(|x| {
-                            format!(
-                                "{}{}",
-                                x,
-                                match s.value(*x) {
-                                    0 => "",
-                                    v if v > 0 => "T",
-                                    _ => "F",
-                                }
-                            )
-                        })
-                        .collect();
-                    out.push(format!("{}{:?}", if side.gate[k] { "G" } else { "" }, d));
-                }
-                out
-            };
-            eprintln!(
-                "ELIM {} gates {} pos {:?}",
-                lit,
-                gates,
-                show(self, lit, &pos)
-            );
-            eprintln!("ELIM neg {:?}", show(self, !lit, &neg));
-            for r in &resolvents {
-                eprintln!("ELIM resolvent {:?}", r);
-            }
-        }
         // Add resolvents.
         for r in &resolvents {
             if let Some(p) = self.proof.as_mut() {
@@ -587,8 +547,8 @@ impl Solver {
                 }
             }
         }
-        self.flags[v as usize] |= ELIMINATED;
-        self.flags[v as usize] &= !(ELIMINATE | SUBSUME);
+        self.flags[v as usize].insert(ELIMINATED);
+        self.flags[v as usize].remove(ELIMINATE | SUBSUME);
         self.eliminated += 1;
         self.stats.eliminated += 1;
         self.unassigned -= 1;
@@ -674,7 +634,7 @@ impl Solver {
                         .arena
                         .lits(c)
                         .iter()
-                        .any(|l| self.flags[l.vidx()] & SUBSUME != 0);
+                        .any(|l| self.flags[l.vidx()].has(SUBSUME));
                     candidates.push((size, c, flagged));
                 }
             }
@@ -789,7 +749,7 @@ impl Solver {
         }
         if complete {
             for f in &mut self.flags {
-                *f &= !SUBSUME;
+                f.remove(SUBSUME);
             }
         }
         complete

@@ -19,7 +19,7 @@ const UNMAPPED: u32 = u32::MAX;
 impl Solver {
     /// Compact if enough variables became inactive.  Must be called at the
     /// root level (outside of dense mode).
-    pub fn compacting(&self) -> bool {
+    pub(crate) fn compacting(&self) -> bool {
         if !self.opts.compact || self.level != 0 || self.dense || self.inconsistent {
             return false;
         }
@@ -29,7 +29,7 @@ impl Solver {
     }
 
     /// Returns false if the formula became inconsistent.
-    pub fn compact(&mut self) -> bool {
+    pub(crate) fn compact(&mut self) -> bool {
         debug_assert_eq!(self.level, 0);
         // Export pending units and remove root-level literals from clauses.
         if self.shared.is_some() && !self.share_units() {
@@ -53,7 +53,7 @@ impl Solver {
         for v in 0..old_vars {
             let e = self.i2e[v] as usize;
             let value = self.values[2 * v];
-            if self.flags[v] & ELIMINATED != 0 {
+            if self.flags[v].has(ELIMINATED) {
                 self.e2i[e] = Lit::INVALID;
             } else if value != 0 {
                 self.ext_fixed[e] = value;
@@ -165,9 +165,6 @@ impl Solver {
         }
         self.seen.clear();
         self.first_seen.clear();
-        if let Some(log) = self.root_log.as_mut() {
-            log.clear();
-        }
         self.recount_phase_heights();
         self.stats.compacts += 1;
         if self.verbose(2) {

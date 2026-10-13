@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! mem[c]     flags: glue (19 bits) | garbage | reason | redundant | shrunken
-//!                   | subsume | vivify | used (5 bits)
+//!                   | (unused) | vivify | used (5 bits)
 //! mem[c + 1] searched position (>= 2)
 //! mem[c + 2] size
 //! mem[c + 3 ..] literals
@@ -32,7 +32,6 @@ pub const GARBAGE: u32 = 1 << 19;
 const REASON: u32 = 1 << 20;
 const REDUNDANT: u32 = 1 << 21;
 const SHRUNKEN: u32 = 1 << 22;
-const SUBSUME: u32 = 1 << 23;
 const VIVIFY: u32 = 1 << 24;
 const USED_SHIFT: u32 = 27;
 const USED_MASK: u32 = MAX_USED << USED_SHIFT;
@@ -47,11 +46,11 @@ pub struct Arena {
 macro_rules! flag {
     ($get:ident, $set:ident, $bit:expr) => {
         #[inline(always)]
-        pub fn $get(&self, c: CRef) -> bool {
+        pub(crate) fn $get(&self, c: CRef) -> bool {
             self.mem[c as usize] & $bit != 0
         }
         #[inline(always)]
-        pub fn $set(&mut self, c: CRef, value: bool) {
+        pub(crate) fn $set(&mut self, c: CRef, value: bool) {
             let w = &mut self.mem[c as usize];
             if value { *w |= $bit } else { *w &= !$bit }
         }
@@ -59,16 +58,12 @@ macro_rules! flag {
 }
 
 impl Arena {
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.mem.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.mem.is_empty()
-    }
-
     /// Allocate a new clause.  The first two literals are the watched ones.
-    pub fn alloc(&mut self, lits: &[Lit], redundant: bool, glue: u32) -> CRef {
+    pub(crate) fn alloc(&mut self, lits: &[Lit], redundant: bool, glue: u32) -> CRef {
         debug_assert!(lits.len() >= 3);
         let c = self.mem.len();
         assert!(
@@ -87,12 +82,12 @@ impl Arena {
     }
 
     #[inline(always)]
-    pub fn size(&self, c: CRef) -> usize {
+    pub(crate) fn size(&self, c: CRef) -> usize {
         self.mem[c as usize + 2] as usize
     }
 
     #[inline(always)]
-    pub fn lits(&self, c: CRef) -> &[Lit] {
+    pub(crate) fn lits(&self, c: CRef) -> &[Lit] {
         let start = c as usize + HEADER;
         let size = self.size(c);
         let words = &self.mem[start..start + size];
@@ -101,7 +96,7 @@ impl Arena {
     }
 
     #[inline(always)]
-    pub fn lits_mut(&mut self, c: CRef) -> &mut [Lit] {
+    pub(crate) fn lits_mut(&mut self, c: CRef) -> &mut [Lit] {
         let start = c as usize + HEADER;
         let size = self.size(c);
         let words = &mut self.mem[start..start + size];
@@ -110,23 +105,23 @@ impl Arena {
     }
 
     #[inline(always)]
-    pub fn glue(&self, c: CRef) -> u32 {
+    pub(crate) fn glue(&self, c: CRef) -> u32 {
         self.mem[c as usize] & GLUE_MASK
     }
 
     #[inline(always)]
-    pub fn set_glue(&mut self, c: CRef, glue: u32) {
+    pub(crate) fn set_glue(&mut self, c: CRef, glue: u32) {
         let w = &mut self.mem[c as usize];
         *w = (*w & !GLUE_MASK) | glue.min(MAX_GLUE);
     }
 
     #[inline(always)]
-    pub fn used(&self, c: CRef) -> u32 {
+    pub(crate) fn used(&self, c: CRef) -> u32 {
         (self.mem[c as usize] & USED_MASK) >> USED_SHIFT
     }
 
     #[inline(always)]
-    pub fn set_used(&mut self, c: CRef, used: u32) {
+    pub(crate) fn set_used(&mut self, c: CRef, used: u32) {
         debug_assert!(used <= MAX_USED);
         let w = &mut self.mem[c as usize];
         *w = (*w & !USED_MASK) | (used << USED_SHIFT);
@@ -135,22 +130,21 @@ impl Arena {
     flag!(garbage, set_garbage, GARBAGE);
     flag!(reason, set_reason, REASON);
     flag!(redundant, set_redundant, REDUNDANT);
-    flag!(subsume, set_subsume, SUBSUME);
     flag!(vivify, set_vivify, VIVIFY);
 
     #[inline(always)]
-    pub fn searched(&self, c: CRef) -> usize {
+    pub(crate) fn searched(&self, c: CRef) -> usize {
         self.mem[c as usize + 1] as usize
     }
 
     #[inline(always)]
-    pub fn set_searched(&mut self, c: CRef, pos: usize) {
+    pub(crate) fn set_searched(&mut self, c: CRef, pos: usize) {
         self.mem[c as usize + 1] = pos as u32;
     }
 
     /// Shrink a clause in place to `new_size` literals (>= 3), padding the
     /// freed words so that linear traversal still works.
-    pub fn shrink(&mut self, c: CRef, new_size: usize) {
+    pub(crate) fn shrink(&mut self, c: CRef, new_size: usize) {
         let old_size = self.size(c);
         debug_assert!(3 <= new_size && new_size <= old_size);
         if new_size == old_size {
@@ -169,7 +163,7 @@ impl Arena {
 
     /// Offset of the clause following `c`.
     #[inline]
-    pub fn next(&self, c: CRef) -> CRef {
+    pub(crate) fn next(&self, c: CRef) -> CRef {
         let mut end = c as usize + HEADER + self.size(c);
         if self.mem[c as usize] & SHRUNKEN != 0 {
             while end < self.mem.len() && self.mem[end] == INVALID_LIT {
@@ -181,33 +175,8 @@ impl Arena {
 
     /// Clear the shrunken flag (after the clause has been moved).
     #[inline]
-    pub fn clear_shrunken(&mut self, c: CRef) {
+    pub(crate) fn clear_shrunken(&mut self, c: CRef) {
         self.mem[c as usize] &= !SHRUNKEN;
-    }
-
-    /// Iterate over all clause references starting at `start`.
-    pub fn refs_from(&self, start: CRef) -> ArenaIter<'_> {
-        ArenaIter {
-            arena: self,
-            pos: start,
-        }
-    }
-}
-
-pub struct ArenaIter<'a> {
-    arena: &'a Arena,
-    pos: CRef,
-}
-
-impl Iterator for ArenaIter<'_> {
-    type Item = CRef;
-    fn next(&mut self) -> Option<CRef> {
-        if self.pos as usize >= self.arena.mem.len() {
-            return None;
-        }
-        let c = self.pos;
-        self.pos = self.arena.next(c);
-        Some(c)
     }
 }
 
@@ -234,10 +203,11 @@ mod tests {
         assert!(a.garbage(c));
         a.set_glue(c, 2);
         assert_eq!(a.used(c), MAX_USED);
-        assert_eq!(a.refs_from(0).collect::<Vec<_>>(), vec![c, d]);
+        assert_eq!(a.next(c), d);
         a.shrink(d, 3);
         let e = a.alloc(&lits(&[8, 9, 10]), false, 0);
-        assert_eq!(a.refs_from(0).collect::<Vec<_>>(), vec![c, d, e]);
+        // Shrunken clauses are padded and can still be traversed.
+        assert_eq!(a.next(d), e);
         assert_eq!(a.lits(d), &lits(&[4, 5, 6])[..]);
     }
 }

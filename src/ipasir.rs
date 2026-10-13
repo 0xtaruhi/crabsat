@@ -5,7 +5,6 @@
 //! (interrupted), `ipasir_val` is valid after SAT and `ipasir_failed` after
 //! UNSAT.
 
-use crate::incremental::{LearnCallback, TerminateCallback};
 use crate::{Options, SolveResult, Solver};
 use std::ffi::{c_char, c_int, c_void};
 
@@ -62,7 +61,7 @@ pub unsafe extern "C" fn ipasir_add(s: *mut c_void, lit_or_zero: i32) {
     let s = unsafe { get(s) };
     if lit_or_zero == 0 {
         let clause = std::mem::take(&mut s.clause);
-        s.solver.add_clause_dimacs(&clause);
+        s.solver.add_clause(&clause);
         s.clause = clause;
         s.clause.clear();
     } else {
@@ -110,6 +109,13 @@ pub unsafe extern "C" fn ipasir_failed(s: *mut c_void, lit: i32) -> c_int {
     unsafe { get(s) }.solver.failed(lit) as c_int
 }
 
+/// Opaque user pointer passed back to C callbacks.
+#[derive(Clone, Copy)]
+struct State(*mut c_void);
+// SAFETY: IPASIR callbacks are only invoked by the thread calling
+// `ipasir_solve`; the caller is responsible for the state it passes.
+unsafe impl Send for State {}
+
 /// Set a callback polled during search; a non-zero result stops the search.
 ///
 /// # Safety
@@ -120,8 +126,14 @@ pub unsafe extern "C" fn ipasir_set_terminate(
     state: *mut c_void,
     terminate: Option<extern "C" fn(*mut c_void) -> c_int>,
 ) {
-    unsafe { get(s) }.solver.terminate_cb =
-        terminate.map(|function| TerminateCallback { state, function });
+    let state = State(state);
+    let callback = terminate.map(|f| -> crate::incremental::TerminateFn {
+        Box::new(move || {
+            let state = state;
+            f(state.0) != 0
+        })
+    });
+    unsafe { get(s) }.solver.set_terminate(callback);
 }
 
 /// Set a callback receiving learned clauses up to `max_length` literals
@@ -136,9 +148,18 @@ pub unsafe extern "C" fn ipasir_set_learn(
     max_length: c_int,
     learn: Option<extern "C" fn(*mut c_void, *mut i32)>,
 ) {
-    unsafe { get(s) }.solver.learn_cb = learn.map(|function| LearnCallback {
-        state,
-        max_length: max_length.max(0) as usize,
-        function,
+    let state = State(state);
+    let callback = learn.map(|f| -> crate::incremental::LearnFn {
+        let mut buffer: Vec<i32> = Vec::new();
+        Box::new(move |clause: &[i32]| {
+            let state = state;
+            buffer.clear();
+            buffer.extend_from_slice(clause);
+            buffer.push(0);
+            f(state.0, buffer.as_mut_ptr());
+        })
     });
+    unsafe { get(s) }
+        .solver
+        .set_learn(max_length.max(0) as usize, callback);
 }

@@ -4,7 +4,7 @@ fn solve(vars: usize, clauses: &[Vec<i32>], opts: Options) -> (SolveResult, Solv
     let mut s = Solver::new(opts);
     s.reserve_vars(vars);
     for c in clauses {
-        s.add_clause_dimacs(c);
+        s.add_clause(c);
     }
     let res = s.solve();
     if res == SolveResult::Sat {
@@ -131,8 +131,8 @@ fn conflict_limit_gives_unknown() {
     let mut s = Solver::new(Options::default());
     s.reserve_vars(vars);
     for c in &clauses {
-        s.add_clause_dimacs(c);
+        s.add_clause(c);
     }
-    s.limits.conflicts = Some(100);
+    s.set_conflict_limit(Some(100));
     assert_eq!(s.solve(), SolveResult::Unknown);
 }

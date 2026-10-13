@@ -69,8 +69,8 @@ Rust:
 use crabsat::{Options, SolveResult, Solver};
 
 let mut s = Solver::new(Options { incremental: true, ..Options::default() });
-s.add_clause_dimacs(&[1, 2]);
-s.add_clause_dimacs(&[-1, 2]);
+s.add_clause(&[1, 2]);
+s.add_clause(&[-1, 2]);
 assert_eq!(s.solve(), SolveResult::Sat);
 assert_eq!(s.val(2), 2);
 s.assume(-2);

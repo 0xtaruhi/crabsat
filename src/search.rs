@@ -8,7 +8,7 @@ use crate::stats::{logn, nlogpown};
 use crate::types::{Lit, SolveResult, Var};
 
 impl Solver {
-    pub fn search(&mut self) -> SolveResult {
+    pub(crate) fn search(&mut self) -> SolveResult {
         if self.inconsistent {
             return SolveResult::Unsat;
         }
@@ -55,9 +55,7 @@ impl Solver {
                 }
             } else if self.terminated() || self.limit_hit() {
                 break SolveResult::Unknown;
-            } else if self.level == 0
-                && ((self.shared.is_some() && !self.share_units()) || !self.replay_units())
-            {
+            } else if self.level == 0 && self.shared.is_some() && !self.share_units() {
                 break SolveResult::Unsat;
             } else if self.reducing() {
                 self.reduce();
@@ -113,7 +111,7 @@ impl Solver {
         self.queue.rebuild(&order);
         self.heap.clear();
         for &v in &order {
-            if self.flags[v as usize] & ELIMINATED == 0 {
+            if !self.flags[v as usize].has(ELIMINATED) {
                 self.heap.push(v);
             }
         }
@@ -121,7 +119,7 @@ impl Solver {
 
     /// Initial order, lucky phases and preprocessing (once).  Returns a
     /// result if the formula was already solved.
-    pub fn presolve(&mut self) -> Option<SolveResult> {
+    pub(crate) fn presolve(&mut self) -> Option<SolveResult> {
         if self.presolved {
             return None;
         }
@@ -212,7 +210,7 @@ impl Solver {
     fn largest_score_unassigned_variable(&mut self) -> Var {
         let mut res = self.heap.max();
         while self.values[Lit::new(res, false).idx()] != 0
-            || self.flags[res as usize] & ELIMINATED != 0
+            || self.flags[res as usize].has(ELIMINATED)
         {
             self.heap.pop_max();
             res = self.heap.max();
@@ -220,7 +218,7 @@ impl Solver {
         res
     }
 
-    pub fn next_decision_variable(&mut self) -> Var {
+    pub(crate) fn next_decision_variable(&mut self) -> Var {
         if let Some(v) = self.next_random_decision() {
             return v;
         }
@@ -234,7 +232,7 @@ impl Solver {
     /// Assign all variables by decisions with saved/target phases and
     /// propagation which ignores conflicts, which makes the saved phases
     /// more consistent before local search (Kissat `warmup.c`).
-    pub fn warmup(&mut self) {
+    pub(crate) fn warmup(&mut self) {
         debug_assert_eq!(self.level, 0);
         self.warming = true;
         while self.unassigned > 0 && !self.terminated() {
@@ -286,9 +284,9 @@ impl Solver {
         true
     }
 
-    pub fn update_scores(&mut self) {
+    pub(crate) fn update_scores(&mut self) {
         for v in 0..self.vars as Var {
-            if self.flags[v as usize] & ELIMINATED == 0 && !self.heap.contains(v) {
+            if !self.flags[v as usize].has(ELIMINATED) && !self.heap.contains(v) {
                 self.heap.push(v);
             }
         }
@@ -507,7 +505,7 @@ impl Solver {
 
     // ------------------------------------------------------------------
 
-    pub fn report(&self, kind: char) {
+    pub(crate) fn report(&self, kind: char) {
         if !self.verbose(1) {
             return;
         }

@@ -1,6 +1,4 @@
-use crabsat::dimacs;
-use crabsat::proof::Proof;
-use crabsat::{Options, SolveResult, Solver};
+use crabsat::{Options, Proof, SolveResult, Solver, dimacs};
 use std::io::{self, Write};
 use std::process::exit;
 use std::sync::Arc;
@@ -86,7 +84,6 @@ fn main() {
     if threads > 1 && files.len() > 1 {
         die("proofs are not supported with '--threads'");
     }
-    let base_opts = opts.clone();
     let quiet = opts.quiet;
     let check = opts.check;
     let binary_proof = opts.binary;
@@ -123,12 +120,12 @@ fn main() {
         if keep {
             original.push(c.to_vec());
         }
-        solver.add_clause_dimacs(c);
+        solver.add_clause(c);
     })
     .unwrap_or_else(|e| die(&format!("parse error in '{input}': {e}")));
     solver.reserve_vars(header.vars);
     // Fresh variables introduced by the solver are not part of the model.
-    let original_vars = solver.vars;
+    let original_vars = solver.num_vars();
     msg(&format!(
         "parsed {} variables {} clauses in {:.2}s",
         header.vars,
@@ -137,7 +134,7 @@ fn main() {
     ));
 
     let flag = Arc::new(AtomicBool::new(false));
-    solver.terminate = Some(flag.clone());
+    solver.set_terminate_flag(flag.clone());
     if let Some(t) = time_limit {
         let flag = flag.clone();
         std::thread::spawn(move || {
@@ -145,23 +142,13 @@ fn main() {
             flag.store(true, Ordering::Relaxed);
         });
     }
-    if let Some(c) = conflicts {
-        solver.limits.conflicts = Some(c);
-    }
-    if let Some(d) = decisions {
-        solver.limits.decisions = Some(d);
-    }
+    solver.set_conflict_limit(conflicts);
+    solver.set_decision_limit(decisions);
 
-    let (res, model, winner) = if threads > 1 {
-        portfolio(
-            &mut solver,
-            &base_opts,
-            &original,
-            original_vars,
-            threads,
-            &flag,
-            conflicts,
-        )
+    let (res, model) = if threads > 1 {
+        let r = solver.solve_portfolio(&original, threads);
+        msg(&format!("portfolio winner: solver {}", r.winner));
+        (r.result, r.model)
     } else {
         let res = solver.solve();
         let model = if res == SolveResult::Sat {
@@ -169,11 +156,8 @@ fn main() {
         } else {
             Vec::new()
         };
-        (res, model, 0)
+        (res, model)
     };
-    if threads > 1 {
-        msg(&format!("portfolio winner: solver {winner}"));
-    }
 
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
@@ -181,9 +165,6 @@ fn main() {
         SolveResult::Sat => {
             if check {
                 let model = &model[..original_vars];
-                if std::env::var_os("CRABSAT_DEBUG_MODEL").is_some() {
-                    debug_model(&solver, &original, model, 0);
-                }
                 for c in &original {
                     if !c.iter().any(|&l| model[l.unsigned_abs() as usize - 1] == l) {
                         die(&format!("model does not satisfy clause {c:?}"));
@@ -215,153 +196,8 @@ fn main() {
     exit(res.exit_code());
 }
 
-/// Options of the portfolio member `i` (member 0 uses the given options).
-fn diversify(base: &Options, i: usize) -> Options {
-    let mut o = base.clone();
-    o.seed = i as u64;
-    o.quiet = true;
-    o.verbose = 0;
-    o.check = false;
-    if base.portfolio == 1 {
-        match i % 8 {
-            1 => o.stable = 2,
-            2 => o.phase = false,
-            3 => o.target = 2,
-            4 => {
-                o.stable = 2;
-                o.phase = false;
-            }
-            5 => o.walkeffort = 150,
-            6 => {
-                o.randec = false;
-                o.reorder = 0;
-            }
-            7 => o.stable = 0,
-            _ => {}
-        }
-        return o;
-    }
-    match i % 8 {
-        1 => o.stable = 2,
-        2 => o.stable = 0,
-        3 => o.phase = false,
-        4 => o.target = 2,
-        5 => o.chrono = false,
-        6 => {
-            o.stable = 2;
-            o.phase = false;
-        }
-        7 => o.tier2 = 8,
-        _ => {}
-    }
-    o
-}
-
-/// Run `threads` diversified solvers sharing units; the first result wins.
-fn portfolio(
-    main: &mut Solver,
-    base: &Options,
-    clauses: &[Vec<i32>],
-    vars: usize,
-    threads: usize,
-    flag: &Arc<AtomicBool>,
-    conflicts: Option<u64>,
-) -> (SolveResult, Vec<i32>, usize) {
-    let shared = Arc::new(crabsat::share::Shared::new(vars));
-    let result: std::sync::Mutex<Option<(SolveResult, Vec<i32>, usize)>> = Default::default();
-    let finish = |res: SolveResult, model: Vec<i32>, id: usize| {
-        if res == SolveResult::Unknown {
-            return;
-        }
-        let mut r = result.lock().unwrap();
-        if r.is_none() {
-            *r = Some((res, model, id));
-            flag.store(true, Ordering::Relaxed);
-        }
-    };
-    main.shared = Some(shared.clone());
-    // Every member preprocesses with its own options: this is done in
-    // parallel and diversifies the simplified formulas (cloning a single
-    // preprocessed solver was measured to be worse).
-    std::thread::scope(|scope| {
-        for i in 1..threads {
-            let shared = shared.clone();
-            let flag = flag.clone();
-            let finish = &finish;
-            scope.spawn(move || {
-                let mut s = Solver::new(diversify(base, i));
-                s.share_id = i as u32;
-                s.reserve_vars(vars);
-                for c in clauses {
-                    s.add_clause_dimacs(c);
-                }
-                s.terminate = Some(flag);
-                s.shared = Some(shared);
-                s.limits.conflicts = conflicts;
-                let res = s.solve();
-                let model = if res == SolveResult::Sat {
-                    s.model()
-                } else {
-                    Vec::new()
-                };
-                if res == SolveResult::Sat && std::env::var_os("CRABSAT_DEBUG_MODEL").is_some() {
-                    debug_model(&s, clauses, &model, i);
-                }
-                finish(res, model, i);
-            });
-        }
-        let res = main.solve();
-        let model = if res == SolveResult::Sat {
-            main.model()
-        } else {
-            Vec::new()
-        };
-        finish(res, model, 0);
-        if res == SolveResult::Unknown && !flag.load(Ordering::Relaxed) {
-            // Conflict limit reached: let the others stop too.
-            flag.store(true, Ordering::Relaxed);
-        }
-    });
-    result
-        .into_inner()
-        .unwrap()
-        .unwrap_or((SolveResult::Unknown, Vec::new(), 0))
-}
-
-fn debug_model(s: &Solver, clauses: &[Vec<i32>], model: &[i32], id: usize) {
-    for c in clauses {
-        if c.iter().any(|&l| model[l.unsigned_abs() as usize - 1] == l) {
-            continue;
-        }
-        eprintln!(
-            "solver {id}: violated {c:?} imported {}",
-            s.stats.imported_units
-        );
-        let target: Vec<crabsat::Lit> = c.iter().map(|&d| crabsat::Lit::from_dimacs(d)).collect();
-        s.debug_reconstruct(&target);
-        for &d in c {
-            let Some(lit) = s.internal(crabsat::Lit::from_dimacs(d)) else {
-                eprintln!("  {d}: compacted away");
-                continue;
-            };
-            let a = s.assigned[lit.vidx()];
-            eprintln!(
-                "  {d}: value {} level {} flags {} in-extension-as-witness {}",
-                s.value(lit),
-                a.level,
-                s.flags[lit.vidx()],
-                s.extension
-                    .iter()
-                    .any(|&e| e & crabsat::solver::WITNESS != 0
-                        && (e & !crabsat::solver::WITNESS) >> 1 == lit.var()),
-            );
-        }
-        return;
-    }
-}
-
 fn print_statistics(s: &Solver) {
-    let st = &s.stats;
+    let st = s.stats();
     let t = s.seconds().max(1e-9);
     let line = |name: &str, v: u64, extra: String| println!("c {name:<22} {v:>14} {extra}");
     println!("c ---- [ statistics ] ----");
@@ -427,7 +263,7 @@ fn print_statistics(s: &Solver) {
         st.eliminated,
         format!(
             "{:.1}% of variables",
-            100.0 * st.eliminated as f64 / s.vars.max(1) as f64
+            100.0 * st.eliminated as f64 / s.num_vars().max(1) as f64
         ),
     );
     line("resolutions", st.eliminate_resolutions, String::new());

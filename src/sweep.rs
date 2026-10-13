@@ -17,7 +17,7 @@ struct Environment {
 }
 
 impl Solver {
-    pub fn sweep(&mut self) -> bool {
+    pub(crate) fn sweep(&mut self) -> bool {
         let start = std::time::Instant::now();
         let res = self.sweep_untimed();
         self.stats.time_sweep += start.elapsed().as_secs_f64();
@@ -60,14 +60,14 @@ impl Solver {
             binaries(p) + binaries(!p) + occs[p.idx()].len() + occs[(!p).idx()].len()
         };
         let mut candidates: Vec<(usize, Var)> = (0..self.vars)
-            .filter(|&v| self.sweepable(v) && self.flags[v] & SWEPT == 0)
+            .filter(|&v| self.sweepable(v) && !self.flags[v].has(SWEPT))
             .map(|v| (occurrences(self, v), v as Var))
             .filter(|&(o, _)| o > 0)
             .collect();
         if candidates.is_empty() {
             // Everything was swept: start over.
             for f in &mut self.flags {
-                *f &= !SWEPT;
+                f.remove(SWEPT);
             }
             return true;
         }
@@ -82,7 +82,7 @@ impl Solver {
             if !self.sweepable(v as usize) {
                 continue;
             }
-            self.flags[v as usize] |= SWEPT;
+            self.flags[v as usize].insert(SWEPT);
             let env = self.environment(v, &occs, &mut map);
             let env_lits: usize = env.clauses.iter().map(|c| c.len()).sum();
             self.stats.sweep_ticks += 1 + (env_lits / 8) as u64;
@@ -122,7 +122,7 @@ impl Solver {
     }
 
     fn sweepable(&self, v: usize) -> bool {
-        self.flags[v] & ELIMINATED == 0 && self.values[2 * v] == 0
+        !self.flags[v].has(ELIMINATED) && self.values[2 * v] == 0
     }
 
     /// Collect clauses around `root` up to the configured depth and size.

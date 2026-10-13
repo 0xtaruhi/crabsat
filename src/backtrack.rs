@@ -21,7 +21,7 @@ impl Solver {
         }
     }
 
-    pub fn backtrack_without_updating_phases(&mut self, new_level: u32) {
+    pub(crate) fn backtrack_without_updating_phases(&mut self, new_level: u32) {
         if self.level == new_level {
             return;
         }
@@ -55,12 +55,12 @@ impl Solver {
         self.propagated = new_end;
     }
 
-    pub fn backtrack_in_consistent_state(&mut self, new_level: u32) {
+    pub(crate) fn backtrack_in_consistent_state(&mut self, new_level: u32) {
         self.update_target_and_best_phases();
         self.backtrack_without_updating_phases(new_level);
     }
 
-    pub fn backtrack_after_conflict(&mut self, new_level: u32) {
+    pub(crate) fn backtrack_after_conflict(&mut self, new_level: u32) {
         if self.level > 0 {
             self.backtrack_without_updating_phases(self.level - 1);
         }
@@ -70,7 +70,7 @@ impl Solver {
 
     /// Backtrack to the root and propagate (used before rephasing and
     /// simplification).  Returns false on root-level conflict.
-    pub fn backtrack_propagate_root(&mut self) -> bool {
+    pub(crate) fn backtrack_propagate_root(&mut self) -> bool {
         if self.level > 0 {
             self.backtrack_in_consistent_state(0);
         }

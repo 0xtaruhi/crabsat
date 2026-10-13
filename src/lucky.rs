@@ -9,7 +9,7 @@ use crate::watch::{self, Watch};
 
 impl Solver {
     fn decidable(&self, v: Var) -> bool {
-        self.flags[v as usize] & ELIMINATED == 0 && self.values[2 * v as usize] == 0
+        !self.flags[v as usize].has(ELIMINATED) && self.values[2 * v as usize] == 0
     }
 
     // ------------------------------------------------------------------
@@ -17,7 +17,7 @@ impl Solver {
 
     /// Try a few simple assignments.  Returns true if one satisfies the
     /// formula (the assignment is left on the trail).
-    pub fn lucky(&mut self) -> bool {
+    pub(crate) fn lucky(&mut self) -> bool {
         let start = std::time::Instant::now();
         let res = self.lucky_untimed();
         self.stats.time_lucky += start.elapsed().as_secs_f64();
@@ -27,7 +27,7 @@ impl Solver {
     /// Cheap lucky check before preprocessing: only the constant
     /// assignments, which do not propagate (and thus do not perturb watches)
     /// unless every clause is satisfied by them.
-    pub fn lucky_early(&mut self) -> bool {
+    pub(crate) fn lucky_early(&mut self) -> bool {
         if !self.opts.lucky || self.inconsistent || !self.backtrack_propagate_root() {
             return false;
         }
@@ -137,7 +137,7 @@ impl Solver {
     // ------------------------------------------------------------------
     // Reordering.
 
-    pub fn reordering(&self) -> bool {
+    pub(crate) fn reordering(&self) -> bool {
         match self.opts.reorder {
             0 => false,
             1 if !self.stable => false,
@@ -191,11 +191,11 @@ impl Solver {
             .collect()
     }
 
-    pub fn reorder(&mut self) {
+    pub(crate) fn reorder(&mut self) {
         self.stats.reordered += 1;
         let weights = self.reorder_weights();
         let mut sorted: Vec<Var> = (0..self.vars as Var)
-            .filter(|&v| self.flags[v as usize] & ELIMINATED == 0)
+            .filter(|&v| !self.flags[v as usize].has(ELIMINATED))
             .collect();
         if self.stable {
             self.rescale_scores_now();
@@ -230,7 +230,7 @@ impl Solver {
     // ------------------------------------------------------------------
     // Random decisions.
 
-    pub fn start_random_sequence(&mut self) {
+    pub(crate) fn start_random_sequence(&mut self) {
         if !self.opts.randec || self.stable {
             return;
         }
@@ -244,7 +244,7 @@ impl Solver {
         self.limits.randec_conflicts = self.stats.conflicts + delta as u64;
     }
 
-    pub fn next_random_decision(&mut self) -> Option<Var> {
+    pub(crate) fn next_random_decision(&mut self) -> Option<Var> {
         if !self.opts.randec || self.stable || self.warming || self.vars == 0 {
             return None;
         }

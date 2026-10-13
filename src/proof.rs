@@ -61,29 +61,23 @@ impl Proof {
         }
     }
 
-    pub fn add(&mut self, lits: &[Lit]) {
+    pub(crate) fn add(&mut self, lits: &[Lit]) {
         self.added += 1;
         self.line(b'a', lits).expect("failed to write proof");
     }
 
-    pub fn delete(&mut self, lits: &[Lit]) {
+    pub(crate) fn delete(&mut self, lits: &[Lit]) {
         self.deleted += 1;
         self.line(b'd', lits).expect("failed to write proof");
     }
 
-    pub fn flush(&mut self) {
+    pub(crate) fn flush(&mut self) {
         self.out.flush().expect("failed to flush proof");
     }
 }
 
 /// Solvers are only cloned for the portfolio, which does not support
 /// proofs.
-impl Clone for Proof {
-    fn clone(&self) -> Self {
-        panic!("proofs can not be cloned");
-    }
-}
-
 impl Drop for Proof {
     fn drop(&mut self) {
         let _ = self.out.flush();

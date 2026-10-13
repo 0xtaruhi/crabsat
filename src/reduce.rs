@@ -7,13 +7,13 @@ use crate::types::Lit;
 use crate::watch;
 
 impl Solver {
-    pub fn reducing(&self) -> bool {
+    pub(crate) fn reducing(&self) -> bool {
         self.opts.reduce
             && self.stats.clauses_redundant > 0
             && self.stats.conflicts >= self.limits.reduce_conflicts
     }
 
-    pub fn reduce(&mut self) {
+    pub(crate) fn reduce(&mut self) {
         let start = std::time::Instant::now();
         self.reduce_untimed();
         self.stats.time_reduce += start.elapsed().as_secs_f64();
@@ -116,7 +116,7 @@ impl Solver {
 
     /// Compact the arena from `start`, updating watches and reasons.  With
     /// `full` also flush satisfied binary clauses.
-    pub fn collect(&mut self, start: CRef, full: bool) {
+    pub(crate) fn collect(&mut self, start: CRef, full: bool) {
         self.stats.collections += 1;
         // Flush watches of large clauses at or after `start`.
         for lit_idx in 0..self.watches.len() {

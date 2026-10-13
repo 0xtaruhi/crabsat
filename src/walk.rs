@@ -47,7 +47,7 @@ impl Rng {
 }
 
 impl Solver {
-    pub fn walk(&mut self) {
+    pub(crate) fn walk(&mut self) {
         let start = std::time::Instant::now();
         self.walk_untimed();
         self.stats.time_walk += start.elapsed().as_secs_f64();
@@ -252,7 +252,7 @@ impl Solver {
             return;
         }
         for v in 0..self.vars {
-            if self.flags[v] & ELIMINATED != 0 || self.fixed(Lit::new(v as u32, false)) != 0 {
+            if self.flags[v].has(ELIMINATED) || self.fixed(Lit::new(v as u32, false)) != 0 {
                 continue;
             }
             self.phases.saved[v] = if best_values[v] { 1 } else { -1 };

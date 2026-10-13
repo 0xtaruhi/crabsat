@@ -13,28 +13,23 @@ pub struct Heap {
 }
 
 impl Heap {
-    pub fn resize(&mut self, vars: usize) {
+    pub(crate) fn resize(&mut self, vars: usize) {
         self.score.resize(vars, 0.0);
         self.pos.resize(vars, ABSENT);
     }
 
     #[inline]
-    pub fn contains(&self, v: Var) -> bool {
+    pub(crate) fn contains(&self, v: Var) -> bool {
         self.pos[v as usize] != ABSENT
     }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.heap.is_empty()
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
-        self.heap.len()
-    }
-
-    #[inline]
-    pub fn max(&self) -> Var {
+    pub(crate) fn max(&self) -> Var {
         self.heap[0]
     }
 
@@ -86,14 +81,14 @@ impl Heap {
         self.pos[v as usize] = i as u32;
     }
 
-    pub fn push(&mut self, v: Var) {
+    pub(crate) fn push(&mut self, v: Var) {
         debug_assert!(!self.contains(v));
         self.pos[v as usize] = self.heap.len() as u32;
         self.heap.push(v);
         self.up(v);
     }
 
-    pub fn pop_max(&mut self) -> Var {
+    pub(crate) fn pop_max(&mut self) -> Var {
         let top = self.heap[0];
         let last = self.heap.pop().unwrap();
         self.pos[top as usize] = ABSENT;
@@ -106,7 +101,7 @@ impl Heap {
     }
 
     /// Set a new score, restoring the heap property if `v` is contained.
-    pub fn update(&mut self, v: Var, new_score: f64) {
+    pub(crate) fn update(&mut self, v: Var, new_score: f64) {
         let old = self.score[v as usize];
         self.score[v as usize] = new_score;
         if self.contains(v) {
@@ -118,18 +113,18 @@ impl Heap {
         }
     }
 
-    pub fn max_score(&self) -> f64 {
+    pub(crate) fn max_score(&self) -> f64 {
         self.score.iter().copied().fold(0.0, f64::max)
     }
 
-    pub fn rescale(&mut self, factor: f64) {
+    pub(crate) fn rescale(&mut self, factor: f64) {
         for s in &mut self.score {
             *s *= factor;
         }
     }
 
     /// Remove all elements (keeps scores).
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         for &v in &self.heap {
             self.pos[v as usize] = ABSENT;
         }

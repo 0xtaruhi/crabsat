@@ -16,30 +16,12 @@
 use crate::solver::{DECISION_REASON, ELIMINATE, ELIMINATED, Frame, SUBSUME, Solver, WITNESS};
 use crate::types::{Lit, Var};
 
-/// Variable of a current assumption (must not be eliminated).
-pub const FROZEN: u8 = 16;
+use crate::flags::FROZEN;
 
-/// Termination callback of the IPASIR interface.
-#[derive(Clone, Copy)]
-pub struct TerminateCallback {
-    pub state: *mut std::ffi::c_void,
-    pub function: extern "C" fn(*mut std::ffi::c_void) -> std::ffi::c_int,
-}
-
-/// Learned clause callback of the IPASIR interface.
-#[derive(Clone, Copy)]
-pub struct LearnCallback {
-    pub state: *mut std::ffi::c_void,
-    pub max_length: usize,
-    pub function: extern "C" fn(*mut std::ffi::c_void, *mut i32),
-}
-
-// SAFETY: the callbacks are only invoked by the thread running the solver;
-// the IPASIR caller is responsible for the state pointers.
-unsafe impl Send for TerminateCallback {}
-unsafe impl Sync for TerminateCallback {}
-unsafe impl Send for LearnCallback {}
-unsafe impl Sync for LearnCallback {}
+/// Callback polled during search; returning true stops the search.
+pub type TerminateFn = Box<dyn Fn() -> bool + Send>;
+/// Callback receiving learned clauses (DIMACS literals).
+pub type LearnFn = Box<dyn FnMut(&[i32]) + Send>;
 
 impl Solver {
     /// Add an assumption (DIMACS literal) for the next `solve` call.
@@ -82,7 +64,7 @@ impl Solver {
     fn is_eliminated_external(&self, e: usize) -> bool {
         match self.e2i[e] {
             Lit::INVALID => self.ext_fixed[e] == 0,
-            i => self.flags[i.vidx()] & ELIMINATED != 0,
+            i => self.flags[i.vidx()].has(ELIMINATED),
         }
     }
 
@@ -149,7 +131,7 @@ impl Solver {
         }
         self.stats.reactivated += reactivated.iter().filter(|&&r| r).count() as u64;
         for c in clauses {
-            self.add_clause_dimacs(&c);
+            self.add_clause(&c);
         }
     }
 
@@ -168,11 +150,11 @@ impl Solver {
             i => {
                 let v = i.var();
                 let f = &mut self.flags[v as usize];
-                if *f & ELIMINATED == 0 {
+                if !f.has(ELIMINATED) {
                     return;
                 }
-                *f &= !ELIMINATED;
-                *f |= ELIMINATE | SUBSUME;
+                f.remove(ELIMINATED);
+                f.insert(ELIMINATE | SUBSUME);
                 self.eliminated -= 1;
                 self.unassigned += 1;
                 self.queue.enqueue(v, true);
@@ -188,7 +170,7 @@ impl Solver {
         self.failed_assumptions.clear();
         for k in 0..self.assumptions.len() {
             if let Some(l) = self.internal(self.assumptions[k]) {
-                self.flags[l.vidx()] |= FROZEN;
+                self.flags[l.vidx()].insert(FROZEN);
             }
         }
     }
@@ -196,7 +178,7 @@ impl Solver {
     pub(crate) fn end_assumptions(&mut self) {
         for k in 0..self.assumptions.len() {
             if let Some(l) = self.internal(self.assumptions[k]) {
-                self.flags[l.vidx()] &= !FROZEN;
+                self.flags[l.vidx()].remove(FROZEN);
             }
         }
         self.assumptions.clear();
@@ -291,24 +273,39 @@ impl Solver {
         self.failed_assumptions = failed;
     }
 
+    /// Set a callback polled during search (about every 64 checks);
+    /// returning true stops the search with `SolveResult::Unknown`.
+    pub fn set_terminate(&mut self, callback: Option<TerminateFn>) {
+        self.terminate_cb = callback;
+    }
+
+    /// Set a callback receiving every learned clause with at most
+    /// `max_length` literals.
+    pub fn set_learn(&mut self, max_length: usize, callback: Option<LearnFn>) {
+        self.learn_cb = callback.map(|f| (max_length, f));
+    }
+
     /// Call the termination callback (throttled).
     pub(crate) fn terminate_callback(&self) -> bool {
-        let Some(cb) = self.terminate_cb else {
+        let Some(cb) = &self.terminate_cb else {
             return false;
         };
         let n = self.terminate_calls.get().wrapping_add(1);
         self.terminate_calls.set(n);
-        n % 64 == 1 && (cb.function)(cb.state) != 0
+        n % 64 == 1 && cb()
     }
 
-    /// Report a learned clause to the learn callback.
+    /// Report the learned clause `lits` to the learn callback.
     pub(crate) fn learn_callback(&mut self, lits: &[Lit]) {
-        let Some(cb) = self.learn_cb else { return };
-        if lits.len() > cb.max_length {
+        let Some((max_length, _)) = self.learn_cb else {
+            return;
+        };
+        if lits.len() > max_length {
             return;
         }
-        let mut clause: Vec<i32> = lits.iter().map(|&l| self.external(l).to_dimacs()).collect();
-        clause.push(0);
-        (cb.function)(cb.state, clause.as_mut_ptr());
+        let clause: Vec<i32> = lits.iter().map(|&l| self.external(l).to_dimacs()).collect();
+        if let Some((_, f)) = self.learn_cb.as_mut() {
+            f(&clause);
+        }
     }
 }

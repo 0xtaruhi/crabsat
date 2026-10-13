@@ -14,7 +14,7 @@ const MAX_SCORE: f64 = 1e150;
 impl Solver {
     /// Analyze a conflict, learn a clause and backtrack.  Returns `false` if
     /// the formula was found to be unsatisfiable.
-    pub fn analyze(&mut self, mut conflict: Conflict) -> bool {
+    pub(crate) fn analyze(&mut self, mut conflict: Conflict) -> bool {
         if self.inconsistent {
             return false;
         }
@@ -170,7 +170,7 @@ impl Solver {
     fn push_analyzed(&mut self, v: Var) {
         let a = &mut self.assigned[v as usize];
         debug_assert!(!a.has(ANALYZED));
-        a.flags |= ANALYZED;
+        a.flags.insert(ANALYZED);
         self.analyzed.push(v);
     }
 
@@ -401,13 +401,13 @@ impl Solver {
 
     #[inline]
     fn push_removable(&mut self, v: Var) {
-        self.assigned[v as usize].flags |= REMOVABLE;
+        self.assigned[v as usize].flags.insert(REMOVABLE);
         self.removable.push(v);
     }
 
     #[inline]
     fn push_poisoned(&mut self, v: Var) {
-        self.assigned[v as usize].flags |= POISONED;
+        self.assigned[v as usize].flags.insert(POISONED);
         self.poisoned.push(v);
     }
 
@@ -507,7 +507,7 @@ impl Solver {
 
     fn reset_poisoned(&mut self) {
         for &v in &self.poisoned {
-            self.assigned[v as usize].flags &= !POISONED;
+            self.assigned[v as usize].flags.remove(POISONED);
         }
         self.poisoned.clear();
     }
@@ -538,14 +538,14 @@ impl Solver {
 
     fn reset_shrinkable(&mut self) {
         while let Some(v) = self.shrinkable.pop() {
-            self.assigned[v as usize].flags &= !SHRINKABLE;
+            self.assigned[v as usize].flags.remove(SHRINKABLE);
         }
     }
 
     fn mark_shrinkable_as_removable(&mut self) {
         while let Some(v) = self.shrinkable.pop() {
             let a = &mut self.assigned[v as usize];
-            a.flags &= !SHRINKABLE;
+            a.flags.remove(SHRINKABLE);
             if !a.has(REMOVABLE) {
                 self.push_removable(v);
             }
@@ -569,7 +569,7 @@ impl Solver {
             }
             return -1;
         }
-        self.assigned[v as usize].flags |= SHRINKABLE;
+        self.assigned[v as usize].flags.insert(SHRINKABLE);
         self.shrinkable.push(v);
         1
     }
@@ -742,7 +742,7 @@ impl Solver {
         if self.analyzed.len() > limit {
             while self.analyzed.len() > saved {
                 let v = self.analyzed.pop().unwrap();
-                self.assigned[v as usize].flags &= !ANALYZED;
+                self.assigned[v as usize].flags.remove(ANALYZED);
             }
             self.delay_bumpreasons.bump();
         } else {
@@ -758,7 +758,7 @@ impl Solver {
         }
     }
 
-    pub fn determine_new_level(&mut self, jump: u32) -> u32 {
+    pub(crate) fn determine_new_level(&mut self, jump: u32) -> u32 {
         let back = self.level - 1;
         let delta = back - jump;
         let limit = if self.opts.chrono {
@@ -856,7 +856,7 @@ impl Solver {
     }
 
     /// Is the large clause `c` the reason of one of its watched literals?
-    pub fn is_reason(&self, c: CRef) -> bool {
+    pub(crate) fn is_reason(&self, c: CRef) -> bool {
         let lits = self.arena.lits(c);
         lits[..2].iter().any(|&l| {
             let a = &self.assigned[l.vidx()];
@@ -910,7 +910,7 @@ impl Solver {
 
     fn reset_analysis_but_not_analyzed_literals(&mut self) {
         for &v in &self.removable {
-            self.assigned[v as usize].flags &= !REMOVABLE;
+            self.assigned[v as usize].flags.remove(REMOVABLE);
         }
         self.removable.clear();
         for &level in &self.levels {
@@ -922,12 +922,12 @@ impl Solver {
 
     fn reset_analyzed(&mut self) {
         for &v in &self.analyzed {
-            self.assigned[v as usize].flags &= !ANALYZED;
+            self.assigned[v as usize].flags.remove(ANALYZED);
         }
         self.analyzed.clear();
     }
 
-    pub fn update_tier_limits(&mut self) {
+    pub(crate) fn update_tier_limits(&mut self) {
         self.stats.retiered += 1;
         self.compute_and_set_tier_limits();
         if self.limits.glue_interval < (1 << 16) {
@@ -936,7 +936,7 @@ impl Solver {
         self.limits.glue_conflicts = self.stats.conflicts + self.limits.glue_interval;
     }
 
-    pub fn compute_and_set_tier_limits(&mut self) {
+    pub(crate) fn compute_and_set_tier_limits(&mut self) {
         let stable = self.stable as usize;
         let used = &self.stats.used[stable];
         let total: u64 = used.iter().sum();
@@ -978,11 +978,11 @@ impl Solver {
     }
 
     /// Kissat uses the focused tier1 and the stable tier2 limit.
-    pub fn tier1_limit(&self) -> u32 {
+    pub(crate) fn tier1_limit(&self) -> u32 {
         self.tier1[0]
     }
 
-    pub fn tier2_limit(&self) -> u32 {
+    pub(crate) fn tier2_limit(&self) -> u32 {
         self.tier2[1].max(self.tier1[0])
     }
 
@@ -1024,7 +1024,7 @@ impl Solver {
         }
     }
 
-    pub fn rescale_scores_now(&mut self) {
+    pub(crate) fn rescale_scores_now(&mut self) {
         self.rescale_scores();
     }
 

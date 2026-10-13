@@ -11,7 +11,7 @@ pub struct Ema {
 }
 
 impl Ema {
-    pub fn new(window: f64) -> Ema {
+    pub(crate) fn new(window: f64) -> Ema {
         let alpha = 1.0 / window;
         Ema {
             value: 0.0,
@@ -23,7 +23,7 @@ impl Ema {
     }
 
     #[inline]
-    pub fn update(&mut self, y: f64) {
+    pub(crate) fn update(&mut self, y: f64) {
         self.biased += self.alpha * (y - self.biased);
         if self.exp != 0.0 {
             let new_exp = self.exp * self.beta;
@@ -51,7 +51,7 @@ pub struct Averages {
 }
 
 impl Averages {
-    pub fn init(&mut self, fast: f64, slow: f64) {
+    pub(crate) fn init(&mut self, fast: f64, slow: f64) {
         if self.initialized {
             return;
         }
@@ -75,7 +75,7 @@ pub struct Reluctant {
 }
 
 impl Reluctant {
-    pub fn enable(&mut self, mut period: u64, limit: u64) {
+    pub(crate) fn enable(&mut self, mut period: u64, limit: u64) {
         if limit != 0 && period > limit {
             period = limit;
         }
@@ -90,12 +90,12 @@ impl Reluctant {
         };
     }
 
-    pub fn disable(&mut self) {
+    pub(crate) fn disable(&mut self) {
         self.period = 0;
     }
 
     #[inline]
-    pub fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) {
         if self.period == 0 || self.trigger {
             return;
         }
@@ -123,7 +123,7 @@ impl Reluctant {
     }
 
     #[inline]
-    pub fn triggered(&mut self) -> bool {
+    pub(crate) fn triggered(&mut self) -> bool {
         let res = self.trigger;
         self.trigger = false;
         res

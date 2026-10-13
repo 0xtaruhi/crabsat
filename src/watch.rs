@@ -72,10 +72,10 @@ pub fn remove_large(ws: &mut WatchList, c: CRef) {
 /// Iterate over a watch list, yielding decoded watches.
 pub enum Watch {
     Binary(Lit),
-    Large(Lit, CRef),
+    Large(CRef),
 }
 
-pub fn iter(ws: &WatchList) -> impl Iterator<Item = Watch> + '_ {
+pub(crate) fn iter(ws: &WatchList) -> impl Iterator<Item = Watch> + '_ {
     let mut i = 0;
     std::iter::from_fn(move || {
         if i >= ws.len() {
@@ -87,7 +87,7 @@ pub fn iter(ws: &WatchList) -> impl Iterator<Item = Watch> + '_ {
             Some(Watch::Binary(head_lit(head)))
         } else {
             i += 2;
-            Some(Watch::Large(head_lit(head), ws[i - 1]))
+            Some(Watch::Large(ws[i - 1]))
         }
     })
 }

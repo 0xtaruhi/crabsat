@@ -98,7 +98,7 @@ impl UnionFind {
 }
 
 impl Solver {
-    pub fn congruence(&mut self) -> bool {
+    pub(crate) fn congruence(&mut self) -> bool {
         let start = std::time::Instant::now();
         let res = self.congruence_untimed();
         self.stats.time_congruence += start.elapsed().as_secs_f64();
@@ -235,7 +235,7 @@ impl Solver {
         let mut units = 0;
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
-            if self.value(lit) != 0 || self.flags[lit.vidx()] & ELIMINATED != 0 {
+            if self.value(lit) != 0 || self.flags[lit.vidx()].has(ELIMINATED) {
                 continue;
             }
             let mut unit = false;
@@ -373,7 +373,7 @@ impl Solver {
     }
 
     fn active_lit(&self, l: Lit) -> bool {
-        self.value(l) == 0 && self.flags[l.vidx()] & ELIMINATED == 0
+        self.value(l) == 0 && !self.flags[l.vidx()].has(ELIMINATED)
     }
 
     /// `lhs = AND(rhs)`: binary clauses `(!lhs | r)` and base clause

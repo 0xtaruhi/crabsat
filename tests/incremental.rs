@@ -29,10 +29,10 @@ fn fresh(clauses: &[Vec<i32>], units: &[i32]) -> SolveResult {
         ..Options::default()
     });
     for c in clauses {
-        s.add_clause_dimacs(c);
+        s.add_clause(c);
     }
     for &u in units {
-        s.add_clause_dimacs(&[u]);
+        s.add_clause(&[u]);
     }
     s.solve()
 }
@@ -86,7 +86,7 @@ fn run(seed: u64, opts: Options, large: bool) -> (usize, usize, u64) {
         for _ in 0..added {
             let len = if large { 3 } else { 2 + rng.below(3) as usize };
             let c: Vec<i32> = (0..len).map(|_| rng.lit(vars)).collect();
-            s.add_clause_dimacs(&c);
+            s.add_clause(&c);
             clauses.push(c);
         }
         let assumptions: Vec<i32> = (0..rng.below(6)).map(|_| rng.lit(vars)).collect();
@@ -129,7 +129,7 @@ fn run(seed: u64, opts: Options, large: bool) -> (usize, usize, u64) {
             SolveResult::Unknown => unreachable!(),
         }
     }
-    (sat, unsat, s.stats.reactivated)
+    (sat, unsat, s.stats().reactivated)
 }
 
 #[test]
@@ -165,17 +165,17 @@ fn reactivation_of_eliminated_variables() {
     let mut s = Solver::new(aggressive());
     for c in [[-1, 2, 0], [-1, 3, 0], [1, -2, -3]] {
         let c: Vec<i32> = c.into_iter().filter(|&l| l != 0).collect();
-        s.add_clause_dimacs(&c);
+        s.add_clause(&c);
     }
-    s.add_clause_dimacs(&[2, 4]);
-    s.add_clause_dimacs(&[3, -4]);
+    s.add_clause(&[2, 4]);
+    s.add_clause(&[3, -4]);
     assert_eq!(s.solve(), SolveResult::Sat);
     s.assume(1);
     s.assume(-4);
     assert_eq!(s.solve(), SolveResult::Sat);
     assert_eq!(s.val(2), 2);
     assert_eq!(s.val(3), 3);
-    s.add_clause_dimacs(&[-1, 4]);
+    s.add_clause(&[-1, 4]);
     s.assume(1);
     s.assume(-4);
     assert_eq!(s.solve(), SolveResult::Unsat);

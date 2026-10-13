@@ -50,12 +50,12 @@ impl Default for Queue {
 
 impl Queue {
     #[inline]
-    pub fn update_search(&mut self, idx: u32) {
+    pub(crate) fn update_search(&mut self, idx: u32) {
         self.search_idx = idx;
         self.search_stamp = self.links[idx as usize].stamp;
     }
 
-    pub fn reassign_stamps(&mut self) {
+    pub(crate) fn reassign_stamps(&mut self) {
         self.stamp = 0;
         let mut idx = self.first;
         while idx != DISCONNECT {
@@ -104,7 +104,7 @@ impl Queue {
     }
 
     /// Append a new variable; `unassigned` tells whether it may be decided.
-    pub fn enqueue(&mut self, idx: Var, unassigned: bool) {
+    pub(crate) fn enqueue(&mut self, idx: Var, unassigned: bool) {
         if self.links.len() <= idx as usize {
             self.links.resize(idx as usize + 1, Links::default());
         }
@@ -116,7 +116,7 @@ impl Queue {
 
     /// Insert a (dequeued) variable at the front, i.e., with lowest
     /// priority.  Stamps have to be reassigned afterwards.
-    pub fn push_front(&mut self, idx: Var) {
+    pub(crate) fn push_front(&mut self, idx: Var) {
         let first = self.first;
         self.links[idx as usize].prev = DISCONNECT;
         self.links[idx as usize].next = first;
@@ -130,7 +130,7 @@ impl Queue {
 
     /// Rebuild the queue with the variables in the given order (the last
     /// one is the first decision candidate).
-    pub fn rebuild(&mut self, order: &[Var]) {
+    pub(crate) fn rebuild(&mut self, order: &[Var]) {
         self.first = DISCONNECT;
         self.last = DISCONNECT;
         self.stamp = 0;
@@ -142,7 +142,7 @@ impl Queue {
     }
 
     /// Remove a variable from the queue (eliminated / fixed).
-    pub fn dequeue(&mut self, idx: Var) {
+    pub(crate) fn dequeue(&mut self, idx: Var) {
         if self.search_idx == idx {
             let l = self.links[idx as usize];
             let search = if l.next != DISCONNECT { l.next } else { l.prev };
@@ -158,7 +158,7 @@ impl Queue {
 
     /// Move `idx` to the end of the queue (bump).  `assigned` is its current
     /// assignment status.
-    pub fn move_to_front(&mut self, idx: Var, assigned: bool) {
+    pub(crate) fn move_to_front(&mut self, idx: Var, assigned: bool) {
         if idx == self.last {
             return;
         }
@@ -177,7 +177,7 @@ impl Queue {
         }
     }
 
-    pub fn reset_search(&mut self) {
+    pub(crate) fn reset_search(&mut self) {
         if self.last != DISCONNECT {
             self.update_search(self.last);
         }

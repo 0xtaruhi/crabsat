@@ -43,7 +43,7 @@ pub struct Kitten {
 }
 
 impl Kitten {
-    pub fn new(vars: usize) -> Kitten {
+    pub(crate) fn new(vars: usize) -> Kitten {
         Kitten {
             vars,
             watches: vec![Vec::new(); 2 * vars],
@@ -56,15 +56,6 @@ impl Kitten {
             seen: vec![false; vars],
             ..Default::default()
         }
-    }
-
-    pub fn vars(&self) -> usize {
-        self.vars
-    }
-
-    #[inline]
-    pub fn value(&self, lit: Lit) -> i8 {
-        self.values[lit.idx()]
     }
 
     fn level(&self) -> u32 {
@@ -80,7 +71,7 @@ impl Kitten {
     }
 
     /// Add a clause (at level 0 only, before or between solves).
-    pub fn add_clause(&mut self, clause: &[Lit]) {
+    pub(crate) fn add_clause(&mut self, clause: &[Lit]) {
         self.backtrack(0);
         if self.inconsistent {
             return;
@@ -288,7 +279,7 @@ impl Kitten {
     }
 
     /// Solve under assumptions with a tick limit.
-    pub fn solve(&mut self, assumptions: &[Lit], tick_limit: u64) -> KittenResult {
+    pub(crate) fn solve(&mut self, assumptions: &[Lit], tick_limit: u64) -> KittenResult {
         self.backtrack(0);
         if self.inconsistent {
             return KittenResult::Unsat;
@@ -341,11 +332,11 @@ impl Kitten {
     }
 
     /// Model value after `Sat` (before the next solve or clause addition).
-    pub fn model_value(&self, lit: Lit) -> bool {
+    pub(crate) fn model_value(&self, lit: Lit) -> bool {
         self.values[lit.idx()] > 0
     }
 
-    pub fn is_inconsistent(&self) -> bool {
+    pub(crate) fn is_inconsistent(&self) -> bool {
         self.inconsistent
     }
 }

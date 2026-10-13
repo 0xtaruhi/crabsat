@@ -9,6 +9,8 @@ use crate::queue::Queue;
 use crate::stats::Stats;
 use crate::types::{Lit, SolveResult, Var};
 use crate::watch::{self, WatchList};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Reason of a decision.
 pub const DECISION_REASON: u32 = u32::MAX;
@@ -17,21 +19,10 @@ pub const UNIT_REASON: u32 = u32::MAX - 1;
 
 pub const INVALID_LEVEL: u32 = u32::MAX;
 
-// `Assigned::flags` bits.
-pub const ANALYZED: u8 = 1;
-pub const BINARY: u8 = 2;
-pub const POISONED: u8 = 4;
-pub const REMOVABLE: u8 = 8;
-pub const SHRINKABLE: u8 = 16;
-
-// `Solver::flags` bits (per variable).
-pub const ELIMINATED: u8 = 1;
-/// Candidate for variable elimination.
-pub const ELIMINATE: u8 = 2;
-/// Candidate for subsumption.
-pub const SUBSUME: u8 = 4;
-/// Already used as root of a sweeping environment.
-pub const SWEPT: u8 = 8;
+pub use crate::flags::{
+    ANALYZED, AssignFlags, BINARY, ELIMINATE, ELIMINATED, POISONED, REMOVABLE, SHRINKABLE, SUBSUME,
+    SWEPT, VarFlags,
+};
 
 /// Tag of the witness literal in the extension stack.
 pub const WITNESS: u32 = 1 << 31;
@@ -43,13 +34,13 @@ pub struct Assigned {
     pub trail: u32,
     /// Clause reference, or for binary reasons the other literal.
     pub reason: u32,
-    pub flags: u8,
+    pub flags: AssignFlags,
 }
 
 impl Assigned {
     #[inline(always)]
-    pub fn has(&self, f: u8) -> bool {
-        self.flags & f != 0
+    pub(crate) fn has(&self, f: AssignFlags) -> bool {
+        self.flags.has(f)
     }
 }
 
@@ -104,7 +95,7 @@ pub struct Delay {
 }
 
 impl Delay {
-    pub fn delaying(&mut self) -> bool {
+    pub(crate) fn delaying(&mut self) -> bool {
         if self.count > 0 {
             self.count -= 1;
             true
@@ -112,11 +103,11 @@ impl Delay {
             false
         }
     }
-    pub fn bump(&mut self) {
+    pub(crate) fn bump(&mut self) {
         self.current = self.current.saturating_add(1);
         self.count = self.current;
     }
-    pub fn reduce(&mut self) {
+    pub(crate) fn reduce(&mut self) {
         if self.current > 0 {
             self.current /= 2;
             self.count = self.current;
@@ -124,126 +115,122 @@ impl Delay {
     }
 }
 
-#[derive(Clone)]
 pub struct Solver {
-    pub opts: Options,
-    pub vars: usize,
+    pub(crate) opts: Options,
+    pub(crate) vars: usize,
 
     // Assignment.
-    pub values: Vec<i8>,
-    pub assigned: Vec<Assigned>,
-    pub trail: Vec<Lit>,
-    pub propagated: usize,
-    pub frames: Vec<Frame>,
-    pub level: u32,
-    pub unassigned: u32,
-    pub inconsistent: bool,
-    pub iterating: bool,
+    pub(crate) values: Vec<i8>,
+    pub(crate) assigned: Vec<Assigned>,
+    pub(crate) trail: Vec<Lit>,
+    pub(crate) propagated: usize,
+    pub(crate) frames: Vec<Frame>,
+    pub(crate) level: u32,
+    pub(crate) unassigned: u32,
+    pub(crate) inconsistent: bool,
+    pub(crate) iterating: bool,
     /// Root-level units not yet written to the proof.
-    pub pending_units: Vec<Lit>,
+    pub(crate) pending_units: Vec<Lit>,
 
     // Clauses.
-    pub arena: Arena,
-    pub watches: Vec<WatchList>,
-    pub delayed: Vec<u32>,
-    pub first_reducible: CRef,
-    pub last_learned: Vec<CRef>,
-    pub fixed_at_last_collect: u64,
+    pub(crate) arena: Arena,
+    pub(crate) watches: Vec<WatchList>,
+    pub(crate) delayed: Vec<u32>,
+    pub(crate) first_reducible: CRef,
+    pub(crate) last_learned: Vec<CRef>,
+    pub(crate) fixed_at_last_collect: u64,
 
     // Simplification.
-    pub flags: Vec<u8>,
+    pub(crate) flags: Vec<VarFlags>,
     /// Per variable: bit 0/1 = positive/negative literal is a factor
     /// candidate (was added in a new irredundant clause).
-    pub factor_flags: Vec<u8>,
+    pub(crate) factor_flags: Vec<u8>,
     /// Extension stack for model reconstruction: groups of a witness
     /// literal (tagged with `WITNESS`) followed by the clause literals.
-    pub extension: Vec<u32>,
-    pub eliminated: u32,
-    pub elimination_bound: u32,
-    pub dense: bool,
+    pub(crate) extension: Vec<u32>,
+    pub(crate) eliminated: u32,
+    pub(crate) elimination_bound: u32,
+    pub(crate) dense: bool,
     /// Probing mode: no conflict counting, phase saving or search ticks.
-    pub probing: bool,
+    pub(crate) probing: bool,
     /// Warming up phases: conflicts are ignored and not counted.
-    pub warming: bool,
+    pub(crate) warming: bool,
     /// Clause which must not propagate (vivification).
-    pub ignore: CRef,
-    pub last_eliminate_ticks: u64,
-    pub last_probe_ticks: u64,
-    pub last_walk_ticks: u64,
+    pub(crate) ignore: CRef,
+    pub(crate) last_eliminate_ticks: u64,
+    pub(crate) last_probe_ticks: u64,
+    pub(crate) last_walk_ticks: u64,
     /// Remaining conflicts of the current random decision sequence.
-    pub randec: u64,
-    pub random: u64,
-    pub last_reduce_conflicts: u64,
+    pub(crate) randec: u64,
+    pub(crate) random: u64,
+    pub(crate) last_reduce_conflicts: u64,
 
     // Heuristics.
-    pub stable: bool,
-    pub phases: Phases,
-    pub target_assigned: u32,
-    pub best_assigned: u32,
-    pub heap: Heap,
-    pub scinc: f64,
-    pub queue: Queue,
-    pub averages: [Averages; 2],
-    pub reluctant: Reluctant,
-    pub tier1: [u32; 2],
-    pub tier2: [u32; 2],
-    pub delay_bumpreasons: Delay,
-    pub delay_congruence: Delay,
-    pub delay_sweep: Delay,
-    pub delay_vivifyirr: Delay,
-    pub mode_ticks: u64,
-    pub mode_start: f64,
+    pub(crate) stable: bool,
+    pub(crate) phases: Phases,
+    pub(crate) target_assigned: u32,
+    pub(crate) best_assigned: u32,
+    pub(crate) heap: Heap,
+    pub(crate) scinc: f64,
+    pub(crate) queue: Queue,
+    pub(crate) averages: [Averages; 2],
+    pub(crate) reluctant: Reluctant,
+    pub(crate) tier1: [u32; 2],
+    pub(crate) tier2: [u32; 2],
+    pub(crate) delay_bumpreasons: Delay,
+    pub(crate) delay_congruence: Delay,
+    pub(crate) delay_sweep: Delay,
+    pub(crate) delay_vivifyirr: Delay,
+    pub(crate) mode_ticks: u64,
+    pub(crate) mode_start: f64,
 
     // Analysis scratch space.
-    pub clause: Vec<Lit>,
-    pub levels: Vec<u32>,
-    pub analyzed: Vec<Var>,
-    pub removable: Vec<Var>,
-    pub poisoned: Vec<Var>,
-    pub shrinkable: Vec<Var>,
-    pub minimize_stack: Vec<Var>,
-    pub promote_levels: Vec<u32>,
-    pub marks: Vec<i8>,
-    pub antecedent_size: u32,
-    pub resolvent_size: u32,
+    pub(crate) clause: Vec<Lit>,
+    pub(crate) levels: Vec<u32>,
+    pub(crate) analyzed: Vec<Var>,
+    pub(crate) removable: Vec<Var>,
+    pub(crate) poisoned: Vec<Var>,
+    pub(crate) shrinkable: Vec<Var>,
+    pub(crate) minimize_stack: Vec<Var>,
+    pub(crate) promote_levels: Vec<u32>,
+    pub(crate) marks: Vec<i8>,
+    pub(crate) antecedent_size: u32,
+    pub(crate) resolvent_size: u32,
 
-    pub limits: Limits,
-    pub stats: Stats,
-    pub proof: Option<Proof>,
-    pub start_time: std::time::Instant,
-    pub terminate: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    pub shared: Option<std::sync::Arc<crate::share::Shared>>,
-    pub exported: usize,
-    pub imported: usize,
-    pub replay: Option<Vec<(u64, u64, Vec<Lit>)>>,
-    pub share_id: u32,
-    pub export_buffer: Vec<crate::share::SharedClause>,
-    pub imported_clauses: usize,
-    pub last_share: u64,
+    pub(crate) limits: Limits,
+    pub(crate) stats: Stats,
+    pub(crate) proof: Option<Proof>,
+    pub(crate) start_time: std::time::Instant,
+    pub(crate) terminate: Option<Arc<AtomicBool>>,
+    pub(crate) shared: Option<Arc<crate::share::Shared>>,
+    pub(crate) exported: usize,
+    pub(crate) imported: usize,
+    pub(crate) share_id: u32,
+    pub(crate) export_buffer: Vec<crate::share::SharedClause>,
+    pub(crate) imported_clauses: usize,
+    pub(crate) last_share: u64,
     /// Preprocessing (and the lucky phases) already ran.
-    pub presolved: bool,
+    pub(crate) presolved: bool,
     /// Assumptions (external literals) for the next solve call.
-    pub assumptions: Vec<Lit>,
-    pub failed_assumptions: Vec<Lit>,
+    pub(crate) assumptions: Vec<Lit>,
+    pub(crate) failed_assumptions: Vec<Lit>,
     /// Model of the last satisfiable call in incremental mode.
-    pub last_model: Vec<i32>,
-    pub terminate_cb: Option<crate::incremental::TerminateCallback>,
-    pub learn_cb: Option<crate::incremental::LearnCallback>,
-    pub terminate_calls: std::cell::Cell<u32>,
-    pub root_log: Option<Vec<Lit>>,
+    pub(crate) last_model: Vec<i32>,
+    pub(crate) terminate_cb: Option<crate::incremental::TerminateFn>,
+    pub(crate) learn_cb: Option<(usize, crate::incremental::LearnFn)>,
+    pub(crate) terminate_calls: std::cell::Cell<u32>,
     /// Variables in order of their first occurrence in added clauses.
-    pub first_seen: Vec<Var>,
-    pub seen: Vec<bool>,
-    pub activated: u64,
+    pub(crate) first_seen: Vec<Var>,
+    pub(crate) seen: Vec<bool>,
     /// Number of external variables (original plus fresh ones).
-    pub evars: usize,
+    pub(crate) evars: usize,
     /// External variable -> internal (positive) literal, or `INVALID` if the
     /// variable was removed by compaction.
-    pub e2i: Vec<Lit>,
+    pub(crate) e2i: Vec<Lit>,
     /// Internal variable -> external variable.
-    pub i2e: Vec<u32>,
+    pub(crate) i2e: Vec<u32>,
     /// Values of external variables fixed at the root and compacted away.
-    pub ext_fixed: Vec<i8>,
+    pub(crate) ext_fixed: Vec<i8>,
 }
 
 impl Solver {
@@ -318,7 +305,6 @@ impl Solver {
             shared: None,
             exported: 0,
             imported: 0,
-            replay: None,
             share_id: 0,
             export_buffer: Vec::new(),
             imported_clauses: 0,
@@ -330,10 +316,8 @@ impl Solver {
             terminate_cb: None,
             learn_cb: None,
             terminate_calls: std::cell::Cell::new(0),
-            root_log: std::env::var_os("CRABSAT_CHECK_DB").map(|_| Vec::new()),
             first_seen: Vec::new(),
             seen: Vec::new(),
-            activated: 0,
             evars: 0,
             e2i: Vec::new(),
             i2e: Vec::new(),
@@ -371,7 +355,7 @@ impl Solver {
     }
 
     /// A fresh variable (internal and external), e.g. for factorization.
-    pub fn new_var(&mut self) -> Var {
+    pub(crate) fn new_var(&mut self) -> Var {
         let v = self.vars as Var;
         self.reserve_vars(self.evars + 1);
         v
@@ -379,14 +363,14 @@ impl Solver {
 
     /// The external literal of an internal literal.
     #[inline]
-    pub fn external(&self, lit: Lit) -> Lit {
+    pub(crate) fn external(&self, lit: Lit) -> Lit {
         Lit::new(self.i2e[lit.vidx()], lit.negated())
     }
 
     /// The internal literal of an external literal, if the variable was not
     /// compacted away.
     #[inline]
-    pub fn internal(&self, lit: Lit) -> Option<Lit> {
+    pub(crate) fn internal(&self, lit: Lit) -> Option<Lit> {
         let i = *self.e2i.get(lit.vidx())?;
         (i != Lit::INVALID).then(|| if lit.negated() { !i } else { i })
     }
@@ -421,17 +405,17 @@ impl Solver {
     }
 
     #[inline(always)]
-    pub fn value(&self, lit: Lit) -> i8 {
+    pub(crate) fn value(&self, lit: Lit) -> i8 {
         self.values[lit.idx()]
     }
 
     #[inline(always)]
-    pub fn level_of(&self, lit: Lit) -> u32 {
+    pub(crate) fn level_of(&self, lit: Lit) -> u32 {
         self.assigned[lit.vidx()].level
     }
 
     #[inline(always)]
-    pub fn fixed(&self, lit: Lit) -> i8 {
+    pub(crate) fn fixed(&self, lit: Lit) -> i8 {
         let v = self.values[lit.idx()];
         if v != 0 && self.assigned[lit.vidx()].level == 0 {
             v
@@ -440,17 +424,17 @@ impl Solver {
         }
     }
 
-    pub fn assigned_count(&self) -> u32 {
+    pub(crate) fn assigned_count(&self) -> u32 {
         self.vars as u32 - self.unassigned
     }
 
     /// After variables were eliminated, recount the trail heights of the
     /// target and best phases over active variables (Kissat `compact.c`).
-    pub fn recount_phase_heights(&mut self) {
+    pub(crate) fn recount_phase_heights(&mut self) {
         let mut target = 0;
         let mut best = 0;
         for v in 0..self.vars {
-            if self.flags[v] & ELIMINATED != 0 {
+            if self.flags[v].has(ELIMINATED) {
                 continue;
             }
             target += (self.phases.target[v] != 0) as u32;
@@ -461,18 +445,15 @@ impl Solver {
     }
 
     /// Assign `lit` (slow path, outside of propagation).
-    pub fn assign(&mut self, lit: Lit, level: u32, binary: bool, mut reason: u32) {
+    pub(crate) fn assign(&mut self, lit: Lit, level: u32, binary: bool, mut reason: u32) {
         debug_assert_eq!(self.values[lit.idx()], 0);
-        let mut flags = if binary { BINARY } else { 0 };
+        let mut flags = if binary { BINARY } else { AssignFlags::EMPTY };
         if level == 0 {
-            if let Some(log) = self.root_log.as_mut() {
-                log.push(lit);
-            }
             if reason != UNIT_REASON {
                 self.pending_units.push(lit);
                 reason = UNIT_REASON;
             }
-            flags = 0;
+            flags = AssignFlags::EMPTY;
             self.stats.units += 1;
         }
         self.values[lit.idx()] = 1;
@@ -491,12 +472,12 @@ impl Solver {
     }
 
     /// Assign a learned or original unit at the root level.
-    pub fn assign_unit(&mut self, lit: Lit) {
+    pub(crate) fn assign_unit(&mut self, lit: Lit) {
         self.assign(lit, 0, false, UNIT_REASON);
     }
 
     /// Assign a learned unit and add it to the proof.
-    pub fn learned_unit(&mut self, lit: Lit) {
+    pub(crate) fn learned_unit(&mut self, lit: Lit) {
         self.assign_unit(lit);
         if let Some(p) = self.proof.as_mut() {
             p.add(&[lit]);
@@ -504,13 +485,13 @@ impl Solver {
     }
 
     /// Assign `lit` with a binary reason `other`.
-    pub fn assign_binary(&mut self, lit: Lit, other: Lit) {
+    pub(crate) fn assign_binary(&mut self, lit: Lit, other: Lit) {
         let level = self.level_of(other);
         self.assign(lit, level, true, other.0);
     }
 
     /// Assign `lit` with a large reason clause.
-    pub fn assign_reference(&mut self, lit: Lit, c: CRef) {
+    pub(crate) fn assign_reference(&mut self, lit: Lit, c: CRef) {
         let mut level = 0;
         for &other in self.arena.lits(c) {
             if other != lit {
@@ -521,7 +502,7 @@ impl Solver {
         self.assign(lit, level, false, c);
     }
 
-    pub fn assign_decision(&mut self, lit: Lit) {
+    pub(crate) fn assign_decision(&mut self, lit: Lit) {
         self.level += 1;
         self.frames.push(Frame {
             decision: lit,
@@ -532,10 +513,7 @@ impl Solver {
         self.assign(lit, self.level, false, DECISION_REASON);
     }
 
-    pub fn flush_pending_units(&mut self) {
-        if let Some(log) = self.root_log.as_mut() {
-            log.extend_from_slice(&self.pending_units);
-        }
+    pub(crate) fn flush_pending_units(&mut self) {
         if let Some(proof) = self.proof.as_mut() {
             for &lit in &self.pending_units {
                 proof.add(&[lit]);
@@ -544,7 +522,7 @@ impl Solver {
         self.pending_units.clear();
     }
 
-    pub fn mark_inconsistent(&mut self) {
+    pub(crate) fn mark_inconsistent(&mut self) {
         if self.inconsistent {
             return;
         }
@@ -558,19 +536,19 @@ impl Solver {
     // ------------------------------------------------------------------
     // Clause creation and deletion.
 
-    pub fn watch_binary(&mut self, a: Lit, b: Lit) {
+    pub(crate) fn watch_binary(&mut self, a: Lit, b: Lit) {
         watch::push_binary(&mut self.watches[a.idx()], b);
         watch::push_binary(&mut self.watches[b.idx()], a);
     }
 
-    pub fn watch_clause(&mut self, c: CRef) {
+    pub(crate) fn watch_clause(&mut self, c: CRef) {
         let lits = self.arena.lits(c);
         let (l0, l1) = (lits[0], lits[1]);
         watch::push_large(&mut self.watches[l0.idx()], l1, c);
         watch::push_large(&mut self.watches[l1.idx()], l0, c);
     }
 
-    pub fn unwatch_clause(&mut self, c: CRef) {
+    pub(crate) fn unwatch_clause(&mut self, c: CRef) {
         let lits = self.arena.lits(c);
         let (l0, l1) = (lits[0], lits[1]);
         watch::remove_large(&mut self.watches[l0.idx()], c);
@@ -579,7 +557,7 @@ impl Solver {
 
     /// A literal was added in a new irredundant clause.
     #[inline]
-    pub fn mark_added_lit(&mut self, lit: Lit) {
+    pub(crate) fn mark_added_lit(&mut self, lit: Lit) {
         let bit = 1 << lit.negated() as u8;
         let f = &mut self.factor_flags[lit.vidx()];
         if *f & bit == 0 {
@@ -589,7 +567,7 @@ impl Solver {
         self.mark_added_var(lit.vidx());
     }
 
-    pub fn new_binary(&mut self, a: Lit, b: Lit) {
+    pub(crate) fn new_binary(&mut self, a: Lit, b: Lit) {
         self.mark_added_lit(a);
         self.mark_added_lit(b);
         self.stats.clauses_binary += 1;
@@ -599,9 +577,9 @@ impl Solver {
     /// A clause with this variable was removed: it becomes an elimination
     /// candidate again.
     #[inline]
-    pub fn mark_removed_var(&mut self, v: usize) {
-        if self.flags[v] & ELIMINATE == 0 {
-            self.flags[v] |= ELIMINATE;
+    pub(crate) fn mark_removed_var(&mut self, v: usize) {
+        if !self.flags[v].has(ELIMINATE) {
+            self.flags[v].insert(ELIMINATE);
             self.stats.variables_eliminate += 1;
         }
     }
@@ -609,20 +587,14 @@ impl Solver {
     /// A clause with this variable was added: it becomes a subsumption
     /// candidate again.
     #[inline]
-    pub fn mark_added_var(&mut self, v: usize) {
-        if self.flags[v] & SUBSUME == 0 {
-            self.flags[v] |= SUBSUME;
+    pub(crate) fn mark_added_var(&mut self, v: usize) {
+        if !self.flags[v].has(SUBSUME) {
+            self.flags[v].insert(SUBSUME);
             self.stats.variables_subsume += 1;
         }
     }
 
-    #[inline]
-    pub fn active(&self, v: usize) -> bool {
-        self.flags[v] & ELIMINATED == 0 && self.fixed(Lit::new(v as Var, false)) == 0
-    }
-
-    pub fn delete_binary(&mut self, a: Lit, b: Lit, proof: bool) {
-        self.trace("delete-binary", &[a, b]);
+    pub(crate) fn delete_binary(&mut self, a: Lit, b: Lit, proof: bool) {
         self.mark_removed_var(a.vidx());
         self.mark_removed_var(b.vidx());
         self.stats.clauses_binary -= 1;
@@ -634,7 +606,7 @@ impl Solver {
     }
 
     /// Add a large clause to the arena and watch it.
-    pub fn new_large(&mut self, lits: &[Lit], redundant: bool, glue: u32) -> CRef {
+    pub(crate) fn new_large(&mut self, lits: &[Lit], redundant: bool, glue: u32) -> CRef {
         let c = self.arena.alloc(lits, redundant, glue);
         if redundant {
             self.stats.clauses_redundant += 1;
@@ -651,34 +623,8 @@ impl Solver {
         c
     }
 
-    /// Debugging: report events on clauses whose literals are a subset of
-    /// the clause given in `CRABSAT_TRACE` (comma separated DIMACS).
-    pub fn trace(&self, event: &str, lits: &[Lit]) {
-        static TARGET: std::sync::OnceLock<Option<Vec<i32>>> = std::sync::OnceLock::new();
-        let target = TARGET.get_or_init(|| {
-            std::env::var_os("CRABSAT_TRACE").map(|spec| {
-                spec.to_string_lossy()
-                    .split(',')
-                    .map(|x| x.trim().parse().unwrap())
-                    .collect()
-            })
-        });
-        let Some(target) = target else { return };
-        if lits
-            .iter()
-            .all(|l| target.contains(&self.external(*l).to_dimacs()))
-        {
-            let d: Vec<i32> = lits.iter().map(|l| self.external(*l).to_dimacs()).collect();
-            eprintln!(
-                "TRACE {event} {d:?} conflicts {} dense {} probing {} level {}",
-                self.stats.conflicts, self.dense, self.probing, self.level
-            );
-        }
-    }
-
     /// Mark a large clause as garbage (removed at the next collection).
-    pub fn mark_garbage(&mut self, c: CRef) {
-        self.trace("garbage", self.arena.lits(c));
+    pub(crate) fn mark_garbage(&mut self, c: CRef) {
         debug_assert!(!self.arena.garbage(c));
         if let Some(p) = self.proof.as_mut() {
             p.delete(self.arena.lits(c));
@@ -696,7 +642,7 @@ impl Solver {
     }
 
     /// Add an original clause given as DIMACS literals.
-    pub fn add_clause_dimacs(&mut self, dimacs: &[i32]) {
+    pub fn add_clause(&mut self, dimacs: &[i32]) {
         let mut lits: Vec<Lit> = Vec::with_capacity(dimacs.len());
         for &d in dimacs {
             let e = Lit::from_dimacs(d);
@@ -713,11 +659,11 @@ impl Solver {
                 }
             }
         }
-        self.add_clause(&lits);
+        self.add_original_clause(&lits);
     }
 
     /// Add an original (irredundant) clause.  Must be called at level 0.
-    pub fn add_clause(&mut self, lits: &[Lit]) {
+    pub(crate) fn add_original_clause(&mut self, lits: &[Lit]) {
         assert_eq!(self.level, 0, "clauses can only be added at the root level");
         if let Some(max) = lits.iter().map(|l| l.vidx()).max() {
             assert!(max < self.vars, "unknown internal variable");
@@ -817,63 +763,9 @@ impl Solver {
         }
     }
 
-    /// A clause of the current clause database falsified (or not
-    /// satisfied) by the current full assignment, for debugging.
-    pub fn unsatisfied_clause(&self) -> Option<Vec<Lit>> {
-        for idx in 0..self.watches.len() {
-            let lit = Lit(idx as u32);
-            for w in watch::iter(&self.watches[idx]) {
-                if let watch::Watch::Binary(other) = w
-                    && self.value(lit) <= 0
-                    && self.value(other) <= 0
-                {
-                    return Some(vec![lit, other]);
-                }
-            }
-        }
-        let mut c = 0;
-        while (c as usize) < self.arena.len() {
-            if !self.arena.garbage(c) && !self.arena.lits(c).iter().any(|&l| self.value(l) > 0) {
-                return Some(self.arena.lits(c).to_vec());
-            }
-            c = self.arena.next(c);
-        }
-        None
-    }
-
-    /// Debugging: replay model reconstruction and report the flips of
-    /// variables of `target` together with the witness clauses.
-    pub fn debug_reconstruct(&self, target: &[Lit]) {
-        let mut value: Vec<bool> = (0..self.evars).map(|e| self.external_value(e)).collect();
-        let ext = &self.extension;
-        let mut end = ext.len();
-        while end > 0 {
-            let mut start = end - 1;
-            while ext[start] & WITNESS == 0 {
-                start -= 1;
-            }
-            let clause: Vec<Lit> = ext[start..end].iter().map(|&e| Lit(e & !WITNESS)).collect();
-            let satisfied = clause.iter().any(|l| value[l.vidx()] != l.negated());
-            if !satisfied {
-                let w = clause[0];
-                value[w.vidx()] = !w.negated();
-                if target.iter().any(|t| t.var() == w.var()) {
-                    let d: Vec<String> = clause.iter().map(|l| format!("{l}")).collect();
-                    let tsat = target.iter().any(|l| value[l.vidx()] != l.negated());
-                    eprintln!(
-                        "FLIP {} by {:?} at {} -> target satisfied {}",
-                        w, d, start, tsat
-                    );
-                }
-            }
-            end = start;
-        }
-    }
-
     /// Push a clause with witness literal `witness` (which must be in the
     /// clause) onto the extension stack.
-    pub fn push_extension(&mut self, witness: Lit, lits: &[Lit]) {
-        self.trace(&format!("extension(witness {witness})"), lits);
+    pub(crate) fn push_extension(&mut self, witness: Lit, lits: &[Lit]) {
         self.extension.push(self.external(witness).0 | WITNESS);
         for &l in lits {
             if l != witness {
@@ -895,45 +787,6 @@ impl Solver {
             self.failed_assumptions.clear();
         }
         self.end_assumptions();
-        if let Some(log) = &self.root_log {
-            for &l in log {
-                if self.value(l) <= 0 || self.flags[l.vidx()] & ELIMINATED != 0 {
-                    eprintln!(
-                        "ROOT VIOLATION {} value {} level {} flags {}",
-                        l,
-                        self.value(l),
-                        self.assigned[l.vidx()].level,
-                        self.flags[l.vidx()]
-                    );
-                }
-            }
-        }
-        if res == SolveResult::Sat
-            && std::env::var_os("CRABSAT_CHECK_DB").is_some()
-            && let Some(c) = self.unsatisfied_clause()
-        {
-            let info: Vec<String> = c
-                .iter()
-                .map(|&l| {
-                    let a = self.assigned[l.vidx()];
-                    format!(
-                        "{}@{}:{}{}",
-                        l,
-                        a.level,
-                        self.value(l),
-                        if self.flags[l.vidx()] & ELIMINATED != 0 {
-                            "E"
-                        } else {
-                            ""
-                        }
-                    )
-                })
-                .collect();
-            panic!(
-                "database clause not satisfied: {info:?} (imported {})",
-                self.stats.imported_units
-            );
-        }
         self.flush_pending_units();
         if let Some(p) = self.proof.as_mut() {
             p.flush();
@@ -941,18 +794,42 @@ impl Solver {
         res
     }
 
-    pub fn terminated(&self) -> bool {
+    pub(crate) fn terminated(&self) -> bool {
         self.terminate
             .as_ref()
-            .is_some_and(|t| t.load(std::sync::atomic::Ordering::Relaxed))
+            .is_some_and(|t| t.load(Ordering::Relaxed))
             || self.terminate_callback()
     }
 
+    /// Stop the search (with `SolveResult::Unknown`) when `flag` is set.
+    pub fn set_terminate_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.terminate = Some(flag);
+    }
+
+    pub fn set_conflict_limit(&mut self, conflicts: Option<u64>) {
+        self.limits.conflicts = conflicts;
+    }
+
+    pub fn set_decision_limit(&mut self, decisions: Option<u64>) {
+        self.limits.decisions = decisions;
+    }
+
+    pub fn stats(&self) -> &Stats {
+        &self.stats
+    }
+
+    /// Number of variables (external, including fresh ones introduced by
+    /// the solver).
+    pub fn num_vars(&self) -> usize {
+        self.evars
+    }
+
+    /// Seconds since the solver was created.
     pub fn seconds(&self) -> f64 {
         self.start_time.elapsed().as_secs_f64()
     }
 
-    pub fn verbose(&self, level: u32) -> bool {
+    pub(crate) fn verbose(&self, level: u32) -> bool {
         !self.opts.quiet && self.opts.verbose >= level
     }
 }
