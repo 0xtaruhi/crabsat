@@ -144,6 +144,7 @@ options! {
     factoreffort: u64 = 50, "bounded variable effort in per mille";
     factoriniticks: u64 = 700, "initial ticks in millions";
     factorsize: u64 = 5, "bounded variable addition clause size";
+    factorminreduction: u64 = 2, "minimum clause reduction of a factorization";
     preprocess: bool = true, "initial preprocessing";
     congruence: bool = true, "congruence closure on extracted gates";
     congruenceandarity: u64 = 1_000_000, "AND gate arity limit";

@@ -74,7 +74,16 @@ impl Solver {
             self.stats.factor_ticks
                 + self.effort_limit_from(self.last_probe_ticks, self.opts.factoreffort)
         };
+        let (bin_before, irr_before) = (self.stats.clauses_binary, self.stats.clauses_irredundant);
         let completed = self.run_factorization(limit);
+        if self.verbose(2) {
+            println!(
+                "c [factor-{}] removed {} binary and {} large clauses",
+                self.stats.factorizations,
+                bin_before as i64 - self.stats.clauses_binary as i64,
+                irr_before as i64 - self.stats.clauses_irredundant as i64
+            );
+        }
         if completed {
             self.limits.factor_marked = self.stats.literals_factor;
         }
@@ -164,7 +173,7 @@ impl Solver {
                     self.factorize_next(&mut f, next);
                 }
                 if let Some((q, reduction)) = best_quotient(&f) {
-                    if reduction > self.elimination_bound as usize {
+                    if reduction > (self.elimination_bound as usize).max(self.opts.factorminreduction as usize) {
                         let touched = self.apply_factoring(&mut f, q);
                         for lit in touched {
                             if lit.0 < f.initial && self.factor_candidate(lit) {
@@ -543,6 +552,7 @@ impl Solver {
     /// priority) with zero score, as in Kissat.
     fn adjust_fresh_variables(&mut self, fresh: &[Var]) {
         for &v in fresh {
+            self.heap.update(v, 0.0);
             self.queue.dequeue(v);
         }
         for &v in fresh {

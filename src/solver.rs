@@ -219,6 +219,7 @@ pub struct Solver {
     /// Variables in order of their first occurrence in added clauses.
     pub first_seen: Vec<Var>,
     pub seen: Vec<bool>,
+    pub activated: u64,
 }
 
 impl Solver {
@@ -297,6 +298,7 @@ impl Solver {
             root_log: std::env::var_os("CRABSAT_CHECK_DB").map(|_| Vec::new()),
             first_seen: Vec::new(),
             seen: Vec::new(),
+            activated: 0,
         };
         s.last_learned = vec![INVALID_REF; s.opts.eagersubsume as usize];
         s.random = s.opts.seed;
