@@ -59,12 +59,15 @@ fn main() {
                     },
                 };
                 let parse_u64 = |v: &str| -> u64 {
-                    v.parse().unwrap_or_else(|_| die(&format!("invalid value in '{arg}'")))
+                    v.parse()
+                        .unwrap_or_else(|_| die(&format!("invalid value in '{arg}'")))
                 };
                 match name {
                     "time" => {
                         time_limit = Some(
-                            value.parse().unwrap_or_else(|_| die(&format!("invalid '{arg}'"))),
+                            value
+                                .parse()
+                                .unwrap_or_else(|_| die(&format!("invalid '{arg}'"))),
                         )
                     }
                     "conflicts" => conflicts = Some(parse_u64(value)),
@@ -150,10 +153,22 @@ fn main() {
     }
 
     let (res, model, winner) = if threads > 1 {
-        portfolio(&mut solver, &base_opts, &original, original_vars, threads, &flag, conflicts)
+        portfolio(
+            &mut solver,
+            &base_opts,
+            &original,
+            original_vars,
+            threads,
+            &flag,
+            conflicts,
+        )
     } else {
         let res = solver.solve();
-        let model = if res == SolveResult::Sat { solver.model() } else { Vec::new() };
+        let model = if res == SolveResult::Sat {
+            solver.model()
+        } else {
+            Vec::new()
+        };
         (res, model, 0)
     };
     if threads > 1 {
@@ -284,7 +299,11 @@ fn portfolio(
                 s.shared = Some(shared);
                 s.limits.conflicts = conflicts;
                 let res = s.solve();
-                let model = if res == SolveResult::Sat { s.model() } else { Vec::new() };
+                let model = if res == SolveResult::Sat {
+                    s.model()
+                } else {
+                    Vec::new()
+                };
                 if res == SolveResult::Sat && std::env::var_os("CRABSAT_DEBUG_MODEL").is_some() {
                     debug_model(&s, clauses, &model, i);
                 }
@@ -292,14 +311,21 @@ fn portfolio(
             });
         }
         let res = main.solve();
-        let model = if res == SolveResult::Sat { main.model() } else { Vec::new() };
+        let model = if res == SolveResult::Sat {
+            main.model()
+        } else {
+            Vec::new()
+        };
         finish(res, model, 0);
         if res == SolveResult::Unknown && !flag.load(Ordering::Relaxed) {
             // Conflict limit reached: let the others stop too.
             flag.store(true, Ordering::Relaxed);
         }
     });
-    result.into_inner().unwrap().unwrap_or((SolveResult::Unknown, Vec::new(), 0))
+    result
+        .into_inner()
+        .unwrap()
+        .unwrap_or((SolveResult::Unknown, Vec::new(), 0))
 }
 
 fn debug_model(s: &Solver, clauses: &[Vec<i32>], model: &[i32], id: usize) {
@@ -307,7 +333,10 @@ fn debug_model(s: &Solver, clauses: &[Vec<i32>], model: &[i32], id: usize) {
         if c.iter().any(|&l| model[l.unsigned_abs() as usize - 1] == l) {
             continue;
         }
-        eprintln!("solver {id}: violated {c:?} imported {}", s.stats.imported_units);
+        eprintln!(
+            "solver {id}: violated {c:?} imported {}",
+            s.stats.imported_units
+        );
         let target: Vec<crabsat::Lit> = c.iter().map(|&d| crabsat::Lit::from_dimacs(d)).collect();
         s.debug_reconstruct(&target);
         for &d in c {
@@ -321,7 +350,10 @@ fn debug_model(s: &Solver, clauses: &[Vec<i32>], model: &[i32], id: usize) {
                 s.value(lit),
                 a.level,
                 s.flags[lit.vidx()],
-                s.extension.iter().any(|&e| e & crabsat::solver::WITNESS != 0 && (e & !crabsat::solver::WITNESS) >> 1 == lit.var()),
+                s.extension
+                    .iter()
+                    .any(|&e| e & crabsat::solver::WITNESS != 0
+                        && (e & !crabsat::solver::WITNESS) >> 1 == lit.var()),
             );
         }
         return;
@@ -333,34 +365,87 @@ fn print_statistics(s: &Solver) {
     let t = s.seconds().max(1e-9);
     let line = |name: &str, v: u64, extra: String| println!("c {name:<22} {v:>14} {extra}");
     println!("c ---- [ statistics ] ----");
-    line("conflicts", st.conflicts, format!("{:.0} per sec", st.conflicts as f64 / t));
+    line(
+        "conflicts",
+        st.conflicts,
+        format!("{:.0} per sec", st.conflicts as f64 / t),
+    );
     line("decisions", st.decisions, String::new());
-    line("propagations", st.propagations, format!("{:.0} per sec", st.propagations as f64 / t));
+    line(
+        "propagations",
+        st.propagations,
+        format!("{:.0} per sec", st.propagations as f64 / t),
+    );
     line("search ticks", st.search_ticks, String::new());
-    line("restarts", st.restarts, format!("reused levels {}", st.restarts_reused_levels));
+    line(
+        "restarts",
+        st.restarts,
+        format!("reused levels {}", st.restarts_reused_levels),
+    );
     line("switched", st.switched, String::new());
     line("rephased", st.rephased, String::new());
-    line("reductions", st.reductions, format!("reduced {}", st.clauses_reduced));
+    line(
+        "reductions",
+        st.reductions,
+        format!("reduced {}", st.clauses_reduced),
+    );
     line("chronological", st.chronological, String::new());
     line("learned", st.clauses_learned, String::new());
     let lits = st.literals_learned.max(1) as f64;
     line("literals deduced", st.literals_deduced, String::new());
-    line("literals minimized", st.literals_minimized, format!("{:.1}%", 100.0 * st.literals_minimized as f64 / st.literals_deduced.max(1) as f64));
-    line("literals shrunken", st.literals_shrunken, format!("{:.1}%", 100.0 * st.literals_shrunken as f64 / st.literals_deduced.max(1) as f64));
-    line("literals learned", st.literals_learned, format!("{:.1} per clause", lits / st.clauses_learned.max(1) as f64));
+    line(
+        "literals minimized",
+        st.literals_minimized,
+        format!(
+            "{:.1}%",
+            100.0 * st.literals_minimized as f64 / st.literals_deduced.max(1) as f64
+        ),
+    );
+    line(
+        "literals shrunken",
+        st.literals_shrunken,
+        format!(
+            "{:.1}%",
+            100.0 * st.literals_shrunken as f64 / st.literals_deduced.max(1) as f64
+        ),
+    );
+    line(
+        "literals learned",
+        st.literals_learned,
+        format!("{:.1} per clause", lits / st.clauses_learned.max(1) as f64),
+    );
     line("eagerly subsumed", st.eagerly_subsumed, String::new());
-    line("otfs", st.otfs_strengthened, format!("strengthened ({} subsumed)", st.otfs_subsumed));
+    line(
+        "otfs",
+        st.otfs_strengthened,
+        format!("strengthened ({} subsumed)", st.otfs_subsumed),
+    );
     line("units", st.units, String::new());
     line("eliminations", st.eliminations, String::new());
-    line("eliminated", st.eliminated, format!("{:.1}% of variables", 100.0 * st.eliminated as f64 / s.vars.max(1) as f64));
+    line(
+        "eliminated",
+        st.eliminated,
+        format!(
+            "{:.1}% of variables",
+            100.0 * st.eliminated as f64 / s.vars.max(1) as f64
+        ),
+    );
     line("resolutions", st.eliminate_resolutions, String::new());
     line("subsumed", st.subsumed, String::new());
     line("strengthened", st.strengthened, String::new());
     line("probings", st.probings, String::new());
     line("failed", st.failed, String::new());
-    line("transitive", st.transitive_reduced, "reduced binary clauses".to_string());
+    line(
+        "transitive",
+        st.transitive_reduced,
+        "reduced binary clauses".to_string(),
+    );
     line("substituted", st.substituted, String::new());
-    line("vivified", st.vivified, format!("of {} checked", st.vivify_checks));
+    line(
+        "vivified",
+        st.vivified,
+        format!("of {} checked", st.vivify_checks),
+    );
     line("probing ticks", st.probing_ticks, String::new());
     line("factorizations", st.factorizations, String::new());
     line("factored", st.factored, "fresh variables".to_string());
@@ -368,7 +453,14 @@ fn print_statistics(s: &Solver) {
     line("congruences", st.congruences, String::new());
     line("congruent", st.congruent, String::new());
     line("walks", st.walks, format!("{} flips", st.walk_flips));
-    line("sweeps", st.sweeps, format!("{} units {} equivalences", st.sweep_units, st.sweep_equivalences));
+    line(
+        "sweeps",
+        st.sweeps,
+        format!(
+            "{} units {} equivalences",
+            st.sweep_units, st.sweep_equivalences
+        ),
+    );
     line("sweep ticks", st.sweep_ticks, String::new());
     for (name, v) in [
         ("eliminate", st.time_eliminate),
@@ -383,7 +475,12 @@ fn print_statistics(s: &Solver) {
         ("stable mode", st.time_stable),
         ("focused mode", st.time_focused),
     ] {
-        println!("c {:<22} {:>14.2} seconds {:5.1}%", format!("time {name}"), v, 100.0 * v / t);
+        println!(
+            "c {:<22} {:>14.2} seconds {:5.1}%",
+            format!("time {name}"),
+            v,
+            100.0 * v / t
+        );
     }
     println!("c {:<22} {:>14.2} seconds", "process time", t);
 }

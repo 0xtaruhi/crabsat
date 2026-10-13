@@ -17,7 +17,11 @@ pub struct Links {
 
 impl Default for Links {
     fn default() -> Self {
-        Links { prev: DISCONNECT, next: DISCONNECT, stamp: 0 }
+        Links {
+            prev: DISCONNECT,
+            next: DISCONNECT,
+            stamp: 0,
+        }
     }
 }
 

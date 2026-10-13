@@ -64,11 +64,30 @@ fn random_3sat(vars: usize, clauses: usize, seed: u64) -> Vec<Vec<i32>> {
 #[test]
 fn trivial() {
     assert_eq!(solve(0, &[], Options::default()).0, SolveResult::Sat);
-    assert_eq!(solve(1, &[vec![]], Options::default()).0, SolveResult::Unsat);
-    assert_eq!(solve(1, &[vec![1], vec![-1]], Options::default()).0, SolveResult::Unsat);
-    assert_eq!(solve(2, &[vec![1, 2], vec![-1, 2], vec![1, -2]], Options::default()).0, SolveResult::Sat);
     assert_eq!(
-        solve(2, &[vec![1, 2], vec![-1, 2], vec![1, -2], vec![-1, -2]], Options::default()).0,
+        solve(1, &[vec![]], Options::default()).0,
+        SolveResult::Unsat
+    );
+    assert_eq!(
+        solve(1, &[vec![1], vec![-1]], Options::default()).0,
+        SolveResult::Unsat
+    );
+    assert_eq!(
+        solve(
+            2,
+            &[vec![1, 2], vec![-1, 2], vec![1, -2]],
+            Options::default()
+        )
+        .0,
+        SolveResult::Sat
+    );
+    assert_eq!(
+        solve(
+            2,
+            &[vec![1, 2], vec![-1, 2], vec![1, -2], vec![-1, -2]],
+            Options::default()
+        )
+        .0,
         SolveResult::Unsat
     );
 }
@@ -77,7 +96,11 @@ fn trivial() {
 fn pigeon_holes() {
     for holes in 2..=7 {
         let (vars, clauses) = pigeon_hole(holes);
-        assert_eq!(solve(vars, &clauses, Options::default()).0, SolveResult::Unsat, "php {holes}");
+        assert_eq!(
+            solve(vars, &clauses, Options::default()).0,
+            SolveResult::Unsat,
+            "php {holes}"
+        );
     }
 }
 
@@ -87,12 +110,18 @@ fn random_3sat_all_modes() {
         let mut sat = 0;
         for seed in 0..60 {
             let clauses = random_3sat(80, 340, seed);
-            let opts = Options { stable, ..Options::default() };
+            let opts = Options {
+                stable,
+                ..Options::default()
+            };
             if solve(80, &clauses, opts).0 == SolveResult::Sat {
                 sat += 1;
             }
         }
-        assert!(sat > 5 && sat < 60, "unexpected SAT ratio {sat}/60 (stable={stable})");
+        assert!(
+            sat > 5 && sat < 60,
+            "unexpected SAT ratio {sat}/60 (stable={stable})"
+        );
     }
 }
 

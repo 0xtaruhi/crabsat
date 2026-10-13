@@ -3,8 +3,8 @@
 
 use crate::arena::{CRef, INVALID_REF, MAX_USED};
 use crate::solver::{
-    Conflict, Solver, ANALYZED, BINARY, DECISION_REASON, INVALID_LEVEL, POISONED, REMOVABLE,
-    SHRINKABLE,
+    ANALYZED, BINARY, Conflict, DECISION_REASON, INVALID_LEVEL, POISONED, REMOVABLE, SHRINKABLE,
+    Solver,
 };
 use crate::stats::MAX_GLUE_USED;
 use crate::types::{Lit, Var};
@@ -299,12 +299,13 @@ impl Solver {
                 // The resolvent is the reason without `lit`.
                 let reason = a.reason;
                 let strengthened = self.on_the_fly_strengthen(reason, lit);
-                if resolved == 1 && self.resolvent_size < conflict_size {
-                    if let Conflict::Large(d) = conflict {
-                        if !self.arena.garbage(d) && d != reason {
-                            self.on_the_fly_subsume(strengthened, d);
-                        }
-                    }
+                if resolved == 1
+                    && self.resolvent_size < conflict_size
+                    && let Conflict::Large(d) = conflict
+                    && !self.arena.garbage(d)
+                    && d != reason
+                {
+                    self.on_the_fly_subsume(strengthened, d);
                 }
                 return Some(strengthened);
             }
@@ -351,8 +352,11 @@ impl Solver {
     fn on_the_fly_strengthen(&mut self, c: CRef, lit: Lit) -> Conflict {
         self.stats.otfs_strengthened += 1;
         let old: Vec<Lit> = self.arena.lits(c).to_vec();
-        let mut lits: Vec<Lit> =
-            old.iter().copied().filter(|&l| l != lit && self.level_of(l) > 0).collect();
+        let mut lits: Vec<Lit> = old
+            .iter()
+            .copied()
+            .filter(|&l| l != lit && self.level_of(l) > 0)
+            .collect();
         if !self.arena.redundant(c) {
             self.mark_removed_var(lit.vidx());
         }
@@ -757,7 +761,11 @@ impl Solver {
     pub fn determine_new_level(&mut self, jump: u32) -> u32 {
         let back = self.level - 1;
         let delta = back - jump;
-        let limit = if self.opts.chrono { self.opts.chronolevels } else { u32::MAX };
+        let limit = if self.opts.chrono {
+            self.opts.chronolevels
+        } else {
+            u32::MAX
+        };
         if delta > limit {
             self.stats.chronological += 1;
             back

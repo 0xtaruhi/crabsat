@@ -4,7 +4,7 @@
 
 use crate::arena::{CRef, INVALID_REF};
 use crate::simplify::Simplified;
-use crate::solver::{Conflict, Solver, ANALYZED, BINARY, DECISION_REASON, ELIMINATED};
+use crate::solver::{ANALYZED, BINARY, Conflict, DECISION_REASON, ELIMINATED, Solver};
 use crate::stats::nlogpown;
 use crate::types::{Lit, Var};
 use crate::watch::{self, Watch};
@@ -119,10 +119,10 @@ impl Solver {
     fn implied_by_binaries(&self, lit: Lit, out: &mut Vec<Lit>) {
         out.clear();
         for w in watch::iter(&self.watches[(!lit).idx()]) {
-            if let Watch::Binary(other) = w {
-                if self.value(other) == 0 {
-                    out.push(other);
-                }
+            if let Watch::Binary(other) = w
+                && self.value(other) == 0
+            {
+                out.push(other);
             }
         }
     }
@@ -248,10 +248,10 @@ impl Solver {
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w {
-                    if lit < other {
-                        binaries.push((lit, other));
-                    }
+                if let Watch::Binary(other) = w
+                    && lit < other
+                {
+                    binaries.push((lit, other));
                 }
             }
         }
@@ -312,9 +312,7 @@ impl Solver {
         let mut c = 0;
         while (c as usize) < self.arena.len() {
             let next = self.arena.next(c);
-            if !self.arena.garbage(c)
-                && self.arena.lits(c).iter().any(|l| repr[l.idx()] != *l)
-            {
+            if !self.arena.garbage(c) && self.arena.lits(c).iter().any(|l| repr[l.idx()] != *l) {
                 lits.clear();
                 let mut tautology = false;
                 for &l in self.arena.lits(c) {
@@ -416,7 +414,8 @@ impl Solver {
             if self.value(lit) != 0 || self.flags[lit.vidx()] & ELIMINATED != 0 {
                 continue;
             }
-            let has_binary = |l: Lit| watch::iter(&self.watches[l.idx()]).any(|w| matches!(w, Watch::Binary(_)));
+            let has_binary =
+                |l: Lit| watch::iter(&self.watches[l.idx()]).any(|w| matches!(w, Watch::Binary(_)));
             if has_binary(!lit) && !has_binary(lit) {
                 candidates.push(lit);
             }

@@ -8,10 +8,10 @@
 //! equivalent literal substitution.
 
 use crate::arena::CRef;
-use crate::solver::{Solver, ELIMINATED};
+use crate::fxhash::{FxHashMap as HashMap, FxHashSet};
+use crate::solver::{ELIMINATED, Solver};
 use crate::types::Lit;
 use crate::watch::{self, Watch};
-use crate::fxhash::{FxHashMap as HashMap, FxHashSet};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Kind {
@@ -85,7 +85,11 @@ impl UnionFind {
             return Vec::new();
         }
         debug_assert!(ra != !rb);
-        let (small, large) = if ra.var() < rb.var() { (ra, rb) } else { (rb, ra) };
+        let (small, large) = if ra.var() < rb.var() {
+            (ra, rb)
+        } else {
+            (rb, ra)
+        };
         self.parent[large.vidx()] = if large.negated() { !small } else { small };
         let moved = std::mem::take(&mut self.members[large.vidx()]);
         self.members[small.vidx()].extend_from_slice(&moved);
@@ -114,7 +118,10 @@ impl Solver {
             return false;
         }
         if self.verbose(3) {
-            println!("c [congruence] extract total {:.2}s", t.elapsed().as_secs_f64());
+            println!(
+                "c [congruence] extract total {:.2}s",
+                t.elapsed().as_secs_f64()
+            );
         }
         if self.verbose(2) {
             let count = |k: Kind| gates.iter().filter(|g| g.kind == k).count();
@@ -142,7 +149,10 @@ impl Solver {
             self.delay_congruence.reduce();
         }
         if self.verbose(2) {
-            println!("c [congruence-{}] found {} equivalences", self.stats.congruences, equivalences);
+            println!(
+                "c [congruence-{}] found {} equivalences",
+                self.stats.congruences, equivalences
+            );
         }
         if self.inconsistent {
             return false;
@@ -154,7 +164,10 @@ impl Solver {
         let t = std::time::Instant::now();
         let ok = self.substitute();
         if self.verbose(3) {
-            println!("c [congruence] substitute {:.2}s", t.elapsed().as_secs_f64());
+            println!(
+                "c [congruence] substitute {:.2}s",
+                t.elapsed().as_secs_f64()
+            );
         }
         ok
     }
@@ -171,10 +184,10 @@ impl Solver {
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(o) = w {
-                    if lit < o {
-                        bins.insert((lit, o));
-                    }
+                if let Watch::Binary(o) = w
+                    && lit < o
+                {
+                    bins.insert((lit, o));
                 }
             }
         }
@@ -254,7 +267,10 @@ impl Solver {
         }
         self.stats.congruent_units += units;
         if units > 0 && self.verbose(2) {
-            println!("c [congruence-{}] found {} units", self.stats.congruences, units);
+            println!(
+                "c [congruence-{}] found {} units",
+                self.stats.congruences, units
+            );
         }
         true
     }
@@ -267,7 +283,10 @@ impl Solver {
                 println!("c [congruence] binaries {:.2}s", t.elapsed().as_secs_f64());
             }
             if self.verbose(2) {
-                println!("c [congruence-{}] extracted {} binaries", self.stats.congruences, n);
+                println!(
+                    "c [congruence-{}] extracted {} binaries",
+                    self.stats.congruences, n
+                );
             }
         }
         if !self.find_binary_units() {
@@ -280,11 +299,12 @@ impl Solver {
         let mut c = 0;
         while (c as usize) < self.arena.len() {
             let next = self.arena.next(c);
-            if !self.arena.garbage(c) && !self.arena.redundant(c) {
-                if self.arena.lits(c).iter().all(|&l| self.value(l) == 0) {
-                    for &l in self.arena.lits(c) {
-                        occs[l.idx()].push(c);
-                    }
+            if !self.arena.garbage(c)
+                && !self.arena.redundant(c)
+                && self.arena.lits(c).iter().all(|&l| self.value(l) == 0)
+            {
+                for &l in self.arena.lits(c) {
+                    occs[l.idx()].push(c);
                 }
             }
             c = next;
@@ -313,28 +333,40 @@ impl Solver {
                 }
                 c = next;
             }
-            println!("c [congruence] naive AND gate count {naive} (binaries {})", bins.len() / 2);
+            println!(
+                "c [congruence] naive AND gate count {naive} (binaries {})",
+                bins.len() / 2
+            );
         }
         let mut gates = Vec::new();
         if self.opts.congruenceands {
             let t = std::time::Instant::now();
             self.extract_and_gates(&occs, &mut gates);
             if self.verbose(3) {
-                println!("c [congruence] extract_and_gates {:.2}s", t.elapsed().as_secs_f64());
+                println!(
+                    "c [congruence] extract_and_gates {:.2}s",
+                    t.elapsed().as_secs_f64()
+                );
             }
         }
         if self.opts.congruenceites {
             let t = std::time::Instant::now();
             self.extract_ite_gates(&occs, &mut gates);
             if self.verbose(3) {
-                println!("c [congruence] extract_ite_gates {:.2}s", t.elapsed().as_secs_f64());
+                println!(
+                    "c [congruence] extract_ite_gates {:.2}s",
+                    t.elapsed().as_secs_f64()
+                );
             }
         }
         if self.opts.congruencexors {
             let t = std::time::Instant::now();
             self.extract_xor_gates(&occs, &mut gates);
             if self.verbose(3) {
-                println!("c [congruence] extract_xor_gates {:.2}s", t.elapsed().as_secs_f64());
+                println!(
+                    "c [congruence] extract_xor_gates {:.2}s",
+                    t.elapsed().as_secs_f64()
+                );
             }
         }
         gates
@@ -355,11 +387,12 @@ impl Solver {
             }
             let mut marked = Vec::new();
             for w in watch::iter(&self.watches[(!lhs).idx()]) {
-                if let Watch::Binary(other) = w {
-                    if self.value(other) == 0 && self.marks[other.idx()] == 0 {
-                        self.marks[other.idx()] = 1;
-                        marked.push(other);
-                    }
+                if let Watch::Binary(other) = w
+                    && self.value(other) == 0
+                    && self.marks[other.idx()] == 0
+                {
+                    self.marks[other.idx()] = 1;
+                    marked.push(other);
                 }
             }
             if marked.len() >= 2 {
@@ -368,11 +401,19 @@ impl Solver {
                     if lits.len() - 1 > arity_limit || lits.len() - 1 > marked.len() {
                         continue;
                     }
-                    if lits.iter().all(|&l| l == lhs || self.marks[(!l).idx()] != 0) {
+                    if lits
+                        .iter()
+                        .all(|&l| l == lhs || self.marks[(!l).idx()] != 0)
+                    {
                         let mut rhs: Vec<Lit> =
                             lits.iter().filter(|&&l| l != lhs).map(|&l| !l).collect();
                         rhs.sort_unstable();
-                        gates.push(Gate { kind: Kind::And, lhs, rhs, garbage: false });
+                        gates.push(Gate {
+                            kind: Kind::And,
+                            lhs,
+                            rhs,
+                            garbage: false,
+                        });
                     }
                 }
             }
@@ -475,7 +516,10 @@ impl Solver {
             let next = self.arena.next(c);
             if !self.arena.garbage(c) && !self.arena.redundant(c) {
                 let lits = self.arena.lits(c);
-                if lits.len() >= 3 && lits.len() <= max_size && lits.iter().all(|&l| self.value(l) == 0) {
+                if lits.len() >= 3
+                    && lits.len() <= max_size
+                    && lits.iter().all(|&l| self.value(l) == 0)
+                {
                     let mut sorted = [Lit::INVALID; 8];
                     sorted[..lits.len()].copy_from_slice(lits);
                     sorted[..lits.len()].sort_unstable_by_key(|l| l.var());
@@ -546,7 +590,12 @@ impl Solver {
                     if !self.active_lit(lhs) {
                         continue;
                     }
-                    gates.push(Gate { kind: Kind::Xor, lhs, rhs: inputs, garbage: false });
+                    gates.push(Gate {
+                        kind: Kind::Xor,
+                        lhs,
+                        rhs: inputs,
+                        garbage: false,
+                    });
                 }
             }
         }
@@ -657,10 +706,10 @@ impl Solver {
             if gates[i].garbage || self.inconsistent {
                 continue;
             }
-            if let Some(old) = keys[i].take() {
-                if table.get(&old) == Some(&i) {
-                    table.remove(&old);
-                }
+            if let Some(old) = keys[i].take()
+                && table.get(&old) == Some(&i)
+            {
+                table.remove(&old);
             }
             // Equivalence (or unit) implied by gate `i`, possibly together
             // with a congruent gate `j`.
@@ -703,15 +752,21 @@ impl Solver {
             };
             let (a, b) = (uf.find(lhs), uf.find(other));
             if self.opts.verbose >= 4 {
-                println!("c congruence gate {:?} lhs {} other {} via {:?} (reps {} {})",
-                    gates[i], lhs, other, j.map(|j| &gates[j]), a, b);
+                println!(
+                    "c congruence gate {:?} lhs {} other {} via {:?} (reps {} {})",
+                    gates[i],
+                    lhs,
+                    other,
+                    j.map(|j| &gates[j]),
+                    a,
+                    b
+                );
             }
             if a == b {
                 continue;
             }
             let inputs = input_vars(&gates[i], j.map(|j| &gates[j]));
-            let direct = gates[i].kind == Kind::And
-                && j.is_none_or(|j| gates[j].kind == Kind::And);
+            let direct = gates[i].kind == Kind::And && j.is_none_or(|j| gates[j].kind == Kind::And);
             if !direct && inputs.len() > 8 {
                 continue;
             }
@@ -743,8 +798,11 @@ impl Solver {
     fn prove_by_cases(&mut self, target: &[Lit], inputs: &[Lit]) {
         let Some(p) = self.proof.as_mut() else { return };
         // Variables of the target are assigned anyway.
-        let inputs: Vec<Lit> =
-            inputs.iter().copied().filter(|v| target.iter().all(|t| t.var() != v.var())).collect();
+        let inputs: Vec<Lit> = inputs
+            .iter()
+            .copied()
+            .filter(|v| target.iter().all(|t| t.var() != v.var()))
+            .collect();
         let cube = |level: usize, m: u32| {
             let mut lits = target.to_vec();
             for (i, &v) in inputs[..level].iter().enumerate() {

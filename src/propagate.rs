@@ -6,7 +6,7 @@
 //! delayed until the current watch list has been traversed.
 
 use crate::arena::{GARBAGE, HEADER};
-use crate::solver::{Assigned, Conflict, Solver, BINARY, UNIT_REASON};
+use crate::solver::{Assigned, BINARY, Conflict, Solver, UNIT_REASON};
 use crate::types::Lit;
 use crate::watch;
 
@@ -97,8 +97,12 @@ impl Solver {
                 if !probing {
                     *at_mut!(saved, l.vidx()) = if l.negated() { -1 } else { 1 };
                 }
-                *at_mut!(assigned, l.vidx()) =
-                    Assigned { level: lvl, trail: trail.len() as u32, reason, flags };
+                *at_mut!(assigned, l.vidx()) = Assigned {
+                    level: lvl,
+                    trail: trail.len() as u32,
+                    reason,
+                    flags,
+                };
                 trail.push(l);
             }};
         }
@@ -220,7 +224,7 @@ impl Solver {
         } else {
             stats.search_ticks += ticks;
         }
-        for d in delayed.chunks_exact(3) {
+        for d in delayed.as_chunks::<3>().0 {
             let ws = &mut watches[d[0] as usize];
             ws.push(d[1]);
             ws.push(d[2]);

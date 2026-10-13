@@ -2,12 +2,19 @@
 //! irredundant clauses starting from the saved phases.  The assignment with
 //! the fewest falsified clauses is written back to the saved phases.
 
-use crate::solver::{Solver, ELIMINATED};
+use crate::solver::{ELIMINATED, Solver};
 use crate::types::Lit;
 use crate::watch::{self, Watch};
 
 /// (average clause size, cb) pairs used to fit the ProbSAT base.
-const CBVALS: [(f64, f64); 6] = [(0.0, 2.0), (3.0, 2.5), (4.0, 2.85), (5.0, 3.7), (6.0, 5.1), (7.0, 7.4)];
+const CBVALS: [(f64, f64); 6] = [
+    (0.0, 2.0),
+    (3.0, 2.5),
+    (4.0, 2.85),
+    (5.0, 3.7),
+    (6.0, 5.1),
+    (7.0, 7.4),
+];
 
 fn fit_cbval(size: f64) -> f64 {
     let mut i = 0;
@@ -31,7 +38,7 @@ impl Rng {
     }
 
     fn below(&mut self, n: usize) -> usize {
-        ((self.next() >> 32) * n as u64 >> 32) as usize
+        (((self.next() >> 32) * n as u64) >> 32) as usize
     }
 
     fn double(&mut self) -> f64 {
@@ -42,9 +49,8 @@ impl Rng {
 impl Solver {
     pub fn walk(&mut self) {
         let start = std::time::Instant::now();
-        let res = self.walk_untimed();
+        self.walk_untimed();
         self.stats.time_walk += start.elapsed().as_secs_f64();
-        res
     }
 
     /// Run local search and update the saved phases.  Must be called at
@@ -80,10 +86,10 @@ impl Solver {
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w {
-                    if lit < other {
-                        push_clause(self, &mut [lit, other].into_iter());
-                    }
+                if let Watch::Binary(other) = w
+                    && lit < other
+                {
+                    push_clause(self, &mut [lit, other].into_iter());
                 }
             }
         }
@@ -134,7 +140,11 @@ impl Solver {
         }
         // Break value table: cb^-break.
         let size = lits.len() as f64 / clauses as f64;
-        let cb = if self.stats.walks & 1 != 0 { fit_cbval(size) } else { 2.0 };
+        let cb = if self.stats.walks & 1 != 0 {
+            fit_cbval(size)
+        } else {
+            2.0
+        };
         let base = 1.0 / cb;
         let mut table: Vec<f64> = Vec::new();
         let mut e = 1.0f64;
@@ -143,11 +153,9 @@ impl Solver {
             e *= base;
         }
         let epsilon = *table.last().unwrap();
-        let mut rng = Rng(
-            0x9e37_79b9_7f4a_7c15
-                ^ self.stats.walks.wrapping_mul(0x1234_5678_9abc_def1)
-                ^ self.opts.seed.wrapping_mul(0x2545_f491_4f6c_dd1d),
-        );
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15
+            ^ self.stats.walks.wrapping_mul(0x1234_5678_9abc_def1)
+            ^ self.opts.seed.wrapping_mul(0x2545_f491_4f6c_dd1d));
         // Best assignment: snapshot plus a prefix of the flip trail.
         let mut best_values = value.clone();
         let mut trail: Vec<u32> = Vec::new();
@@ -176,7 +184,11 @@ impl Solver {
                     }
                 }
                 ticks += 1 + occs[(!l).idx()].len() as u64 / 8;
-                let s = if breaks < table.len() { table[breaks] } else { epsilon };
+                let s = if breaks < table.len() {
+                    table[breaks]
+                } else {
+                    epsilon
+                };
                 scores.push(s);
                 sum += s;
             }

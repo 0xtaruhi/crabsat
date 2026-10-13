@@ -3,7 +3,7 @@
 //! `rephase.c`, `decide.c`).
 
 use crate::queue::DISCONNECT;
-use crate::solver::{Solver, ELIMINATED};
+use crate::solver::{ELIMINATED, Solver};
 use crate::stats::{logn, nlogpown};
 use crate::types::{Lit, SolveResult, Var};
 
@@ -22,10 +22,16 @@ impl Solver {
         if self.verbose(4) {
             let pos = self.phases.saved.iter().filter(|&&p| p > 0).count();
             let qlast = self.queue.last;
-            let hmax = if self.heap.is_empty() { u32::MAX } else { self.heap.max() };
+            let hmax = if self.heap.is_empty() {
+                u32::MAX
+            } else {
+                self.heap.max()
+            };
             println!(
                 "c [debug] saved positive {pos} of {} queue last {qlast} search {} heap max {hmax} trail {}",
-                self.vars, self.queue.search_idx, self.trail.len()
+                self.vars,
+                self.queue.search_idx,
+                self.trail.len()
             );
         }
         self.start_search();
@@ -44,9 +50,9 @@ impl Solver {
                 break SolveResult::Sat;
             } else if self.terminated() || self.limit_hit() {
                 break SolveResult::Unknown;
-            } else if self.level == 0 && self.shared.is_some() && !self.share_units() {
-                break SolveResult::Unsat;
-            } else if self.level == 0 && !self.replay_units() {
+            } else if self.level == 0
+                && ((self.shared.is_some() && !self.share_units()) || !self.replay_units())
+            {
                 break SolveResult::Unsat;
             } else if self.reducing() {
                 self.reduce();
@@ -136,8 +142,13 @@ impl Solver {
     }
 
     fn limit_hit(&self) -> bool {
-        self.limits.conflicts.is_some_and(|l| self.stats.conflicts >= l)
-            || self.limits.decisions.is_some_and(|l| self.stats.decisions >= l)
+        self.limits
+            .conflicts
+            .is_some_and(|l| self.stats.conflicts >= l)
+            || self
+                .limits
+                .decisions
+                .is_some_and(|l| self.stats.decisions >= l)
     }
 
     fn start_search(&mut self) {
@@ -275,7 +286,8 @@ impl Solver {
 
     fn init_reluctant(&mut self) {
         if self.opts.reluctant {
-            self.reluctant.enable(self.opts.reluctantint, self.opts.reluctantlim);
+            self.reluctant
+                .enable(self.opts.reluctantint, self.opts.reluctantlim);
         } else {
             self.reluctant.disable();
         }

@@ -53,7 +53,9 @@ impl ParseValue for bool {
 impl ParseValue for u64 {
     fn parse_value(s: &str) -> Option<u64> {
         // Accept "1e3" style values like Kissat.
-        s.parse::<u64>().ok().or_else(|| s.parse::<f64>().ok().map(|f| f as u64))
+        s.parse::<u64>()
+            .ok()
+            .or_else(|| s.parse::<f64>().ok().map(|f| f as u64))
     }
 }
 

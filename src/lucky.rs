@@ -2,7 +2,7 @@
 //! decision reordering by clause weights (`reorder.c`) and random decision
 //! sequences (`decide.c`).
 
-use crate::solver::{Solver, ELIMINATED};
+use crate::solver::{ELIMINATED, Solver};
 use crate::stats::logn;
 use crate::types::{Lit, Var};
 use crate::watch::{self, Watch};
@@ -160,7 +160,11 @@ impl Solver {
             if !self.arena.garbage(c) && !self.arena.redundant(c) {
                 let lits = self.arena.lits(c);
                 if !lits.iter().any(|&l| self.value(l) > 0) {
-                    let size = lits.iter().filter(|&&l| self.value(l) == 0).count().clamp(2, max_size);
+                    let size = lits
+                        .iter()
+                        .filter(|&&l| self.value(l) == 0)
+                        .count()
+                        .clamp(2, max_size);
                     for &l in lits {
                         weights[l.idx()] += table[size];
                     }
@@ -171,11 +175,11 @@ impl Solver {
         for idx in 0..2 * self.vars {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w {
-                    if lit < other {
-                        weights[lit.idx()] += table[2];
-                        weights[other.idx()] += table[2];
-                    }
+                if let Watch::Binary(other) = w
+                    && lit < other
+                {
+                    weights[lit.idx()] += table[2];
+                    weights[other.idx()] += table[2];
                 }
             }
         }
@@ -190,8 +194,9 @@ impl Solver {
     pub fn reorder(&mut self) {
         self.stats.reordered += 1;
         let weights = self.reorder_weights();
-        let mut sorted: Vec<Var> =
-            (0..self.vars as Var).filter(|&v| self.flags[v as usize] & ELIMINATED == 0).collect();
+        let mut sorted: Vec<Var> = (0..self.vars as Var)
+            .filter(|&v| self.flags[v as usize] & ELIMINATED == 0)
+            .collect();
         if self.stable {
             self.rescale_scores_now();
             let heap = &self.heap;
@@ -250,7 +255,10 @@ impl Solver {
             self.start_random_sequence();
         }
         loop {
-            self.random = self.random.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.random = self
+                .random
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let v = ((self.random >> 33) % self.vars as u64) as Var;
             if self.decidable(v) {
                 return Some(v);

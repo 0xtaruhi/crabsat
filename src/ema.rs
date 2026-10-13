@@ -13,7 +13,13 @@ pub struct Ema {
 impl Ema {
     pub fn new(window: f64) -> Ema {
         let alpha = 1.0 / window;
-        Ema { value: 0.0, biased: 0.0, alpha, beta: 1.0 - alpha, exp: 1.0 }
+        Ema {
+            value: 0.0,
+            biased: 0.0,
+            alpha,
+            beta: 1.0 - alpha,
+            exp: 1.0,
+        }
     }
 
     #[inline]
@@ -98,7 +104,7 @@ impl Reluctant {
             return;
         }
         let (mut u, mut v) = (self.u, self.v);
-        if (u & u.wrapping_neg()) == v {
+        if u.isolate_lowest_one() == v {
             u += 1;
             v = 1;
         } else {

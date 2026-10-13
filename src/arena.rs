@@ -71,7 +71,10 @@ impl Arena {
     pub fn alloc(&mut self, lits: &[Lit], redundant: bool, glue: u32) -> CRef {
         debug_assert!(lits.len() >= 3);
         let c = self.mem.len();
-        assert!(c + HEADER + lits.len() < u32::MAX as usize, "arena overflow");
+        assert!(
+            c + HEADER + lits.len() < u32::MAX as usize,
+            "arena overflow"
+        );
         let mut flags = glue.min(MAX_GLUE);
         if redundant {
             flags |= REDUNDANT;
@@ -184,7 +187,10 @@ impl Arena {
 
     /// Iterate over all clause references starting at `start`.
     pub fn refs_from(&self, start: CRef) -> ArenaIter<'_> {
-        ArenaIter { arena: self, pos: start }
+        ArenaIter {
+            arena: self,
+            pos: start,
+        }
     }
 }
 

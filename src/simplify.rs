@@ -8,7 +8,7 @@
 //! Redundant large clauses are disconnected.
 
 use crate::arena::CRef;
-use crate::solver::{Solver, ELIMINATED};
+use crate::solver::{ELIMINATED, Solver};
 use crate::types::Lit;
 use crate::watch;
 
@@ -41,8 +41,13 @@ impl Solver {
         if falsified == 0 {
             return Simplified::Large;
         }
-        let lits: Vec<Lit> =
-            self.arena.lits(c).iter().copied().filter(|&l| self.fixed(l) == 0).collect();
+        let lits: Vec<Lit> = self
+            .arena
+            .lits(c)
+            .iter()
+            .copied()
+            .filter(|&l| self.fixed(l) == 0)
+            .collect();
         self.strengthen_to(c, &lits)
     }
 

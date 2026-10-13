@@ -171,4 +171,3 @@ pub fn logn(count: u64) -> f64 {
 pub fn nlogpown(count: u64, exponent: u32) -> f64 {
     count as f64 * logn(count).powi(exponent as i32)
 }
-

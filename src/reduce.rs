@@ -2,7 +2,7 @@
 //! `reduce.c`, `collect.c`).
 
 use crate::arena::{CRef, HEADER, INVALID_REF, MAX_USED};
-use crate::solver::{Solver, BINARY};
+use crate::solver::{BINARY, Solver};
 use crate::types::Lit;
 use crate::watch;
 
@@ -15,9 +15,8 @@ impl Solver {
 
     pub fn reduce(&mut self) {
         let start = std::time::Instant::now();
-        let res = self.reduce_untimed();
+        self.reduce_untimed();
         self.stats.time_reduce += start.elapsed().as_secs_f64();
-        res
     }
 
     fn reduce_untimed(&mut self) {

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Format, lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets -- -D warnings
+      - run: cargo test --release
+
+  fuzz:
+    name: Differential fuzzing (models and DRAT proofs)
+    runs-on: ubuntu-latest
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        opts:
+          - ""
+          - "--probeinit=0 --probeint=1 --eliminateinit=0 --eliminateint=1 --compactlim=0"
+          - "--stable=2 --reduceinit=10 --reduceint=5 --chronolevels=0"
+          - "--threads=4 --shareint=1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Cache reference tools
+        id: tools
+        uses: actions/cache@v4
+        with:
+          path: tools
+          key: tools-kissat-rel-4.0.4-drat-trim-2e3b2dc
+      - name: Build Kissat and drat-trim
+        if: steps.tools.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p tools
+          git clone --depth 1 --branch rel-4.0.4 https://github.com/arminbiere/kissat tools/kissat-src
+          (cd tools/kissat-src && ./configure && make -j"$(nproc)")
+          cp tools/kissat-src/build/kissat tools/kissat
+          git clone https://github.com/marijnheule/drat-trim tools/drat-trim-src
+          (cd tools/drat-trim-src && git checkout 2e3b2dc0ecf938addbd779d42877b6ed69d9a985)
+          gcc -O2 -D_DEFAULT_SOURCE -o tools/drat-trim tools/drat-trim-src/drat-trim.c
+      - name: Fuzz
+        run: |
+          python3 scripts/fuzz.py --crabsat target/release/crabsat \
+            --ref tools/kissat --drat-trim tools/drat-trim \
+            -n 300 --opts="${{ matrix.opts }}"

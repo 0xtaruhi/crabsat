@@ -4,7 +4,7 @@
 
 use crate::arena::CRef;
 use crate::simplify::Simplified;
-use crate::solver::{Solver, ELIMINATE, ELIMINATED, SUBSUME};
+use crate::solver::{ELIMINATE, ELIMINATED, SUBSUME, Solver};
 use crate::stats::nlogpown;
 use crate::types::{Lit, Var};
 use crate::watch::{self, Watch};
@@ -147,7 +147,11 @@ impl Solver {
                 self.limits.eliminate_variables = self.stats.variables_eliminate;
                 self.limits.subsume_variables = self.stats.variables_subsume;
             } else {
-                self.elimination_bound = if current == 0 { 1 } else { (2 * current).min(max_bound) };
+                self.elimination_bound = if current == 0 {
+                    1
+                } else {
+                    (2 * current).min(max_bound)
+                };
                 for f in &mut self.flags {
                     *f |= ELIMINATE;
                 }
@@ -245,11 +249,12 @@ impl Solver {
         // Mark all li with binary clauses (!lit | li).
         let mut marked = Vec::new();
         for occ in &neg.occs {
-            if let Occ::Binary(other) = *occ {
-                if self.value(other) == 0 && self.marks[other.idx()] == 0 {
-                    self.marks[other.idx()] = 1;
-                    marked.push(other);
-                }
+            if let Occ::Binary(other) = *occ
+                && self.value(other) == 0
+                && self.marks[other.idx()] == 0
+            {
+                self.marks[other.idx()] = 1;
+                marked.push(other);
             }
         }
         let mut found = None;
@@ -257,9 +262,11 @@ impl Solver {
             for (k, occ) in pos.occs.iter().enumerate() {
                 let ok = match *occ {
                     Occ::Binary(other) => self.marks[(!other).idx()] != 0,
-                    Occ::Large(c) => self.arena.lits(c).iter().all(|&l| {
-                        l == lit || self.value(l) < 0 || self.marks[(!l).idx()] != 0
-                    }),
+                    Occ::Large(c) => self
+                        .arena
+                        .lits(c)
+                        .iter()
+                        .all(|&l| l == lit || self.value(l) < 0 || self.marks[(!l).idx()] != 0),
                 };
                 if ok {
                     found = Some(k);
@@ -281,11 +288,11 @@ impl Solver {
                 }
             }
             for (m, occ) in neg.occs.iter().enumerate() {
-                if let Occ::Binary(other) = *occ {
-                    if self.marks[other.idx()] != 0 {
-                        neg.gate[m] = true;
-                        self.marks[other.idx()] = 0; // only one binary per input
-                    }
+                if let Occ::Binary(other) = *occ
+                    && self.marks[other.idx()] != 0
+                {
+                    neg.gate[m] = true;
+                    self.marks[other.idx()] = 0; // only one binary per input
                 }
             }
             for &l in &lits {
@@ -338,7 +345,9 @@ impl Solver {
             // (!c | !t | lit) with {!c, !t} = {a, b}.
             for (nc, nt) in [(a, b), (b, a)] {
                 let (c, t) = (!nc, !nt);
-                let Some(&j) = neg_pairs.get(&key(!c, t)) else { continue };
+                let Some(&j) = neg_pairs.get(&key(!c, t)) else {
+                    continue;
+                };
                 // Find (c | !e | lit) in pos and (c | e | !lit) in neg.
                 for &(k, (x, y)) in &pos_ternaries {
                     if k == i {
@@ -355,7 +364,9 @@ impl Solver {
                     if e.var() == t.var() || e.var() == c.var() {
                         continue;
                     }
-                    let Some(&m) = neg_pairs.get(&key(c, e)) else { continue };
+                    let Some(&m) = neg_pairs.get(&key(c, e)) else {
+                        continue;
+                    };
                     pos.gate[i] = true;
                     pos.gate[k] = true;
                     neg.gate[j] = true;
@@ -435,7 +446,8 @@ impl Solver {
         }
         let mut pos = Side::default();
         let mut neg = Side::default();
-        if !self.gather_occurrences(pos_lit, &mut pos) || !self.gather_occurrences(!pos_lit, &mut neg)
+        if !self.gather_occurrences(pos_lit, &mut pos)
+            || !self.gather_occurrences(!pos_lit, &mut neg)
         {
             return false;
         }
@@ -458,7 +470,9 @@ impl Solver {
         let Some(resolvents) = self.resolve(lit, &pos, &neg, gates, bound) else {
             return false;
         };
-        if std::env::var("CRABSAT_TRACE_VAR").ok().and_then(|x| x.parse::<u32>().ok())
+        if std::env::var("CRABSAT_TRACE_VAR")
+            .ok()
+            .and_then(|x| x.parse::<u32>().ok())
             == Some(v + 1)
         {
             let show = |s: &Solver, side_lit: Lit, side: &Side| {
@@ -468,13 +482,28 @@ impl Solver {
                     s.occ_lits(side_lit, occ, &mut l);
                     let d: Vec<String> = l
                         .iter()
-                        .map(|x| format!("{}{}", x, match s.value(*x) { 0 => "", v if v > 0 => "T", _ => "F" }))
+                        .map(|x| {
+                            format!(
+                                "{}{}",
+                                x,
+                                match s.value(*x) {
+                                    0 => "",
+                                    v if v > 0 => "T",
+                                    _ => "F",
+                                }
+                            )
+                        })
                         .collect();
                     out.push(format!("{}{:?}", if side.gate[k] { "G" } else { "" }, d));
                 }
                 out
             };
-            eprintln!("ELIM {} gates {} pos {:?}", lit, gates, show(self, lit, &pos));
+            eprintln!(
+                "ELIM {} gates {} pos {:?}",
+                lit,
+                gates,
+                show(self, lit, &pos)
+            );
             eprintln!("ELIM neg {:?}", show(self, !lit, &neg));
             for r in &resolvents {
                 eprintln!("ELIM resolvent {:?}", r);
@@ -633,8 +662,11 @@ impl Solver {
             if !self.arena.garbage(c) && !self.arena.redundant(c) {
                 let size = self.arena.size(c);
                 if size <= clslim {
-                    let flagged =
-                        self.arena.lits(c).iter().any(|l| self.flags[l.vidx()] & SUBSUME != 0);
+                    let flagged = self
+                        .arena
+                        .lits(c)
+                        .iter()
+                        .any(|l| self.flags[l.vidx()] & SUBSUME != 0);
                     candidates.push((size, c, flagged));
                 }
             }

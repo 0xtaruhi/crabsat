@@ -419,7 +419,11 @@ impl Solver {
     #[inline(always)]
     pub fn fixed(&self, lit: Lit) -> i8 {
         let v = self.values[lit.idx()];
-        if v != 0 && self.assigned[lit.vidx()].level == 0 { v } else { 0 }
+        if v != 0 && self.assigned[lit.vidx()].level == 0 {
+            v
+        } else {
+            0
+        }
     }
 
     pub fn assigned_count(&self) -> u32 {
@@ -447,8 +451,8 @@ impl Solver {
         debug_assert_eq!(self.values[lit.idx()], 0);
         let mut flags = if binary { BINARY } else { 0 };
         if level == 0 {
-            if self.root_log.is_some() {
-                self.root_log.as_mut().unwrap().push(lit);
+            if let Some(log) = self.root_log.as_mut() {
+                log.push(lit);
             }
             if reason != UNIT_REASON {
                 self.pending_units.push(lit);
@@ -463,8 +467,12 @@ impl Solver {
         if !self.probing {
             self.phases.saved[lit.vidx()] = if lit.negated() { -1 } else { 1 };
         }
-        self.assigned[lit.vidx()] =
-            Assigned { level, trail: self.trail.len() as u32, reason, flags };
+        self.assigned[lit.vidx()] = Assigned {
+            level,
+            trail: self.trail.len() as u32,
+            reason,
+            flags,
+        };
         self.trail.push(lit);
     }
 
@@ -606,10 +614,8 @@ impl Solver {
         self.stats.clauses_binary -= 1;
         watch::remove_binary(&mut self.watches[a.idx()], b);
         watch::remove_binary(&mut self.watches[b.idx()], a);
-        if proof {
-            if let Some(p) = self.proof.as_mut() {
-                p.delete(&[a, b]);
-            }
+        if proof && let Some(p) = self.proof.as_mut() {
+            p.delete(&[a, b]);
         }
     }
 
@@ -637,11 +643,17 @@ impl Solver {
         static TARGET: std::sync::OnceLock<Option<Vec<i32>>> = std::sync::OnceLock::new();
         let target = TARGET.get_or_init(|| {
             std::env::var_os("CRABSAT_TRACE").map(|spec| {
-                spec.to_string_lossy().split(',').map(|x| x.trim().parse().unwrap()).collect()
+                spec.to_string_lossy()
+                    .split(',')
+                    .map(|x| x.trim().parse().unwrap())
+                    .collect()
             })
         });
         let Some(target) = target else { return };
-        if lits.iter().all(|l| target.contains(&self.external(*l).to_dimacs())) {
+        if lits
+            .iter()
+            .all(|l| target.contains(&self.external(*l).to_dimacs()))
+        {
             let d: Vec<i32> = lits.iter().map(|l| self.external(*l).to_dimacs()).collect();
             eprintln!(
                 "TRACE {event} {d:?} conflicts {} dense {} probing {} level {}",
@@ -737,11 +749,11 @@ impl Solver {
         if satisfied {
             return;
         }
-        if simplified.len() != lits.len() {
-            if let Some(p) = self.proof.as_mut() {
-                p.add(&simplified);
-                p.delete(lits);
-            }
+        if simplified.len() != lits.len()
+            && let Some(p) = self.proof.as_mut()
+        {
+            p.add(&simplified);
+            p.delete(lits);
         }
         match simplified.len() {
             0 => self.mark_inconsistent(),
@@ -797,10 +809,11 @@ impl Solver {
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let watch::Watch::Binary(other) = w {
-                    if self.value(lit) <= 0 && self.value(other) <= 0 {
-                        return Some(vec![lit, other]);
-                    }
+                if let watch::Watch::Binary(other) = w
+                    && self.value(lit) <= 0
+                    && self.value(other) <= 0
+                {
+                    return Some(vec![lit, other]);
                 }
             }
         }
@@ -833,7 +846,10 @@ impl Solver {
                 if target.iter().any(|t| t.var() == w.var()) {
                     let d: Vec<String> = clause.iter().map(|l| format!("{l}")).collect();
                     let tsat = target.iter().any(|l| value[l.vidx()] != l.negated());
-                    eprintln!("FLIP {} by {:?} at {} -> target satisfied {}", w, d, start, tsat);
+                    eprintln!(
+                        "FLIP {} by {:?} at {} -> target satisfied {}",
+                        w, d, start, tsat
+                    );
                 }
             }
             end = start;
@@ -867,23 +883,31 @@ impl Solver {
                 }
             }
         }
-        if res == SolveResult::Sat && std::env::var_os("CRABSAT_CHECK_DB").is_some() {
-            if let Some(c) = self.unsatisfied_clause() {
-                let info: Vec<String> = c
-                    .iter()
-                    .map(|&l| {
-                        let a = self.assigned[l.vidx()];
-                        format!(
-                            "{}@{}:{}{}",
-                            l,
-                            a.level,
-                            self.value(l),
-                            if self.flags[l.vidx()] & ELIMINATED != 0 { "E" } else { "" }
-                        )
-                    })
-                    .collect();
-                panic!("database clause not satisfied: {info:?} (imported {})", self.stats.imported_units);
-            }
+        if res == SolveResult::Sat
+            && std::env::var_os("CRABSAT_CHECK_DB").is_some()
+            && let Some(c) = self.unsatisfied_clause()
+        {
+            let info: Vec<String> = c
+                .iter()
+                .map(|&l| {
+                    let a = self.assigned[l.vidx()];
+                    format!(
+                        "{}@{}:{}{}",
+                        l,
+                        a.level,
+                        self.value(l),
+                        if self.flags[l.vidx()] & ELIMINATED != 0 {
+                            "E"
+                        } else {
+                            ""
+                        }
+                    )
+                })
+                .collect();
+            panic!(
+                "database clause not satisfied: {info:?} (imported {})",
+                self.stats.imported_units
+            );
         }
         self.flush_pending_units();
         if let Some(p) = self.proof.as_mut() {

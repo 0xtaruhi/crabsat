@@ -119,7 +119,8 @@ impl Kitten {
             }
             _ => {
                 let c = self.clauses.len() as u32;
-                self.clauses.push((self.lits.len() as u32, lits.len() as u32));
+                self.clauses
+                    .push((self.lits.len() as u32, lits.len() as u32));
                 self.lits.extend_from_slice(lits);
                 self.watches[lits[0].idx()].push(c);
                 self.watches[lits[1].idx()].push(c);

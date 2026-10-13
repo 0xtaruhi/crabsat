@@ -6,7 +6,7 @@
 
 use crate::arena::CRef;
 use crate::kitten::{Kitten, KittenResult};
-use crate::solver::{Solver, ELIMINATED, SWEPT};
+use crate::solver::{ELIMINATED, SWEPT, Solver};
 use crate::types::{Lit, Var};
 use crate::watch::{self, Watch};
 
@@ -53,7 +53,9 @@ impl Solver {
         let occurrences = |s: &Solver, v: usize| {
             let p = Lit::new(v as Var, false);
             let binaries = |l: Lit| {
-                watch::iter(&s.watches[l.idx()]).filter(|w| matches!(w, Watch::Binary(_))).count()
+                watch::iter(&s.watches[l.idx()])
+                    .filter(|w| matches!(w, Watch::Binary(_)))
+                    .count()
             };
             binaries(p) + binaries(!p) + occs[p.idx()].len() + occs[(!p).idx()].len()
         };
@@ -127,7 +129,10 @@ impl Solver {
     fn environment(&self, root: Var, occs: &[Vec<CRef>], map: &mut [u32]) -> Environment {
         let max_vars = self.opts.sweepvars as usize;
         let max_clauses = self.opts.sweepclauses as usize;
-        let mut env = Environment { vars: vec![root], clauses: Vec::new() };
+        let mut env = Environment {
+            vars: vec![root],
+            clauses: Vec::new(),
+        };
         map[root as usize] = 0;
         let mut seen_clauses: crate::fxhash::FxHashSet<CRef> = Default::default();
         let mut seen_binaries: crate::fxhash::FxHashSet<(Lit, Lit)> = Default::default();
@@ -143,7 +148,11 @@ impl Solver {
                             if self.value(other) != 0 {
                                 continue;
                             }
-                            let key = if lit < other { (lit, other) } else { (other, lit) };
+                            let key = if lit < other {
+                                (lit, other)
+                            } else {
+                                (other, lit)
+                            };
                             if seen_binaries.insert(key) {
                                 new.push(vec![lit, other]);
                             }
@@ -158,7 +167,12 @@ impl Solver {
                             continue;
                         }
                         if seen_clauses.insert(c) {
-                            new.push(lits.iter().copied().filter(|&l| self.value(l) == 0).collect());
+                            new.push(
+                                lits.iter()
+                                    .copied()
+                                    .filter(|&l| self.value(l) == 0)
+                                    .collect(),
+                            );
                         }
                     }
                     for clause in new {
@@ -193,14 +207,22 @@ impl Solver {
 
     /// Add Kitten's new learned clauses (mapped to global literals) to the
     /// proof.
-    fn flush_kitten_lemmas(&mut self, kitten: &Kitten, flushed: &mut usize, env: &Environment, added: &mut Vec<Vec<Lit>>) {
+    fn flush_kitten_lemmas(
+        &mut self,
+        kitten: &Kitten,
+        flushed: &mut usize,
+        env: &Environment,
+        added: &mut Vec<Vec<Lit>>,
+    ) {
         if self.proof.is_none() {
             *flushed = kitten.learned.len();
             return;
         }
         for lemma in &kitten.learned[*flushed..] {
-            let global: Vec<Lit> =
-                lemma.iter().map(|l| Lit::new(env.vars[l.vidx()], l.negated())).collect();
+            let global: Vec<Lit> = lemma
+                .iter()
+                .map(|l| Lit::new(env.vars[l.vidx()], l.negated()))
+                .collect();
             self.proof.as_mut().unwrap().add(&global);
             added.push(global);
         }
@@ -356,8 +378,13 @@ impl<'a> Model<'a> {
                 occs[l.idx()].push(i as u32);
             }
         }
-        let mut m =
-            Model { env, value: vec![false; n], count: vec![0; env.clauses.len()], occs, ticks: 0 };
+        let mut m = Model {
+            env,
+            value: vec![false; n],
+            count: vec![0; env.clauses.len()],
+            occs,
+            ticks: 0,
+        };
         m.update(kitten);
         m
     }
@@ -403,7 +430,10 @@ impl<'a> Model<'a> {
         let mut any = false;
         for v in 0..self.value.len() {
             let t = self.true_lit(v as u32);
-            if self.occs[t.idx()].iter().any(|&c| self.count[c as usize] == 1) {
+            if self.occs[t.idx()]
+                .iter()
+                .any(|&c| self.count[c as usize] == 1)
+            {
                 continue;
             }
             for &c in &self.occs[t.idx()] {

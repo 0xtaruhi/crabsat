@@ -5,7 +5,7 @@
 //! performed, so they can be imported by every other solver unless the
 //! variable was eliminated or substituted there.
 
-use crate::solver::{Solver, ELIMINATED};
+use crate::solver::{ELIMINATED, Solver};
 use crate::types::Lit;
 use std::sync::Mutex;
 
@@ -37,7 +37,10 @@ pub struct Shared {
 
 impl Shared {
     pub fn new(vars: usize) -> Shared {
-        Shared { vars, ..Default::default() }
+        Shared {
+            vars,
+            ..Default::default()
+        }
     }
 }
 
@@ -45,7 +48,9 @@ impl Solver {
     /// Remember a learned clause for export (if short with small glue and
     /// only on original variables).
     pub fn export_clause(&mut self, lits: &[Lit], glue: u32) {
-        let Some(shared) = self.shared.as_ref() else { return };
+        let Some(shared) = self.shared.as_ref() else {
+            return;
+        };
         if lits.len() > self.opts.sharesize as usize || glue > self.opts.shareglue {
             return;
         }
@@ -57,13 +62,19 @@ impl Solver {
             }
             ext.push(e);
         }
-        self.export_buffer.push(SharedClause { from: self.share_id, glue, lits: ext });
+        self.export_buffer.push(SharedClause {
+            from: self.share_id,
+            glue,
+            lits: ext,
+        });
     }
 
     /// Exchange learned clauses (called at restarts).  Imported clauses are
     /// added at the root level.  Returns false on inconsistency.
     pub fn share_clauses(&mut self) -> bool {
-        let Some(shared) = self.shared.clone() else { return true };
+        let Some(shared) = self.shared.clone() else {
+            return true;
+        };
         if !self.opts.share || self.stats.conflicts < self.last_share + self.opts.shareint {
             return true;
         }
@@ -82,7 +93,11 @@ impl Solver {
             for k in start - pool.base..pool.clauses.len() {
                 let c = &pool.clauses[k];
                 if c.from != self.share_id {
-                    new.push(SharedClause { from: c.from, glue: c.glue, lits: c.lits.clone() });
+                    new.push(SharedClause {
+                        from: c.from,
+                        glue: c.glue,
+                        lits: c.lits.clone(),
+                    });
                 }
             }
             self.imported_clauses = pool.base + pool.clauses.len();
@@ -148,7 +163,9 @@ impl Solver {
     /// Must be called at level 0 after propagation.  Returns false if the
     /// formula became inconsistent.
     pub fn share_units(&mut self) -> bool {
-        let Some(shared) = self.shared.clone() else { return true };
+        let Some(shared) = self.shared.clone() else {
+            return true;
+        };
         debug_assert_eq!(self.level, 0);
         let mut units = shared.units.lock().unwrap();
         // Units are exchanged as external literals.
@@ -205,9 +222,20 @@ impl Solver {
         if let Some(prefix) = std::env::var_os("CRABSAT_IMPORT_LOG") {
             use std::io::Write;
             let path = format!("{}.{}", prefix.to_string_lossy(), self.opts.seed);
-            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .unwrap();
             let lits: Vec<String> = units.iter().map(|l| l.to_dimacs().to_string()).collect();
-            writeln!(f, "{} {} {}", self.stats.conflicts, self.stats.decisions, lits.join(" ")).unwrap();
+            writeln!(
+                f,
+                "{} {} {}",
+                self.stats.conflicts,
+                self.stats.decisions,
+                lits.join(" ")
+            )
+            .unwrap();
         }
     }
 
@@ -223,7 +251,11 @@ impl Solver {
                 .lines()
                 .map(|l| {
                     let v: Vec<i64> = l.split_whitespace().map(|x| x.parse().unwrap()).collect();
-                    (v[0] as u64, v[1] as u64, v[2..].iter().map(|&d| Lit::from_dimacs(d as i32)).collect())
+                    (
+                        v[0] as u64,
+                        v[1] as u64,
+                        v[2..].iter().map(|&d| Lit::from_dimacs(d as i32)).collect(),
+                    )
                 })
                 .collect();
             self.replay = Some(entries);
@@ -238,7 +270,9 @@ impl Solver {
         }
         let mut assigned = false;
         for ext in units {
-            let Some(lit) = self.internal(ext) else { continue };
+            let Some(lit) = self.internal(ext) else {
+                continue;
+            };
             if self.flags[lit.vidx()] & ELIMINATED != 0 {
                 continue;
             }

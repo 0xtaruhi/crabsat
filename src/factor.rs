@@ -5,7 +5,7 @@
 //! if this reduces the number of clauses.
 
 use crate::arena::CRef;
-use crate::solver::{Solver, ELIMINATED};
+use crate::solver::{ELIMINATED, Solver};
 use crate::types::{Lit, Var};
 use crate::watch::{self, Watch};
 
@@ -95,7 +95,9 @@ impl Solver {
         let mut c = 0;
         while (c as usize) < self.arena.len() {
             let next = self.arena.next(c);
-            if !self.arena.garbage(c) && !self.arena.redundant(c) && self.arena.size(c) <= size_limit
+            if !self.arena.garbage(c)
+                && !self.arena.redundant(c)
+                && self.arena.size(c) <= size_limit
             {
                 for &l in self.arena.lits(c) {
                     f.occs[l.idx()].push(c);
@@ -172,15 +174,17 @@ impl Solver {
                     }
                     self.factorize_next(&mut f, next);
                 }
-                if let Some((q, reduction)) = best_quotient(&f) {
-                    if reduction > (self.elimination_bound as usize).max(self.opts.factorminreduction as usize) {
-                        let touched = self.apply_factoring(&mut f, q);
-                        for lit in touched {
-                            if lit.0 < f.initial && self.factor_candidate(lit) {
-                                let occs = self.occurrences(&f, lit);
-                                if occs > 1 {
-                                    schedule.push((occs, std::cmp::Reverse(lit)));
-                                }
+                if let Some((q, reduction)) = best_quotient(&f)
+                    && reduction
+                        > (self.elimination_bound as usize)
+                            .max(self.opts.factorminreduction as usize)
+                {
+                    let touched = self.apply_factoring(&mut f, q);
+                    for lit in touched {
+                        if lit.0 < f.initial && self.factor_candidate(lit) {
+                            let occs = self.occurrences(&f, lit);
+                            if occs > 1 {
+                                schedule.push((occs, std::cmp::Reverse(lit)));
                             }
                         }
                     }
@@ -238,7 +242,11 @@ impl Solver {
         }
         self.stats.factor_ticks += 1 + clauses.len() as u64;
         let res = clauses.len();
-        f.quotients.push(Quotient { factor, clauses, matches: Vec::new() });
+        f.quotients.push(Quotient {
+            factor,
+            clauses,
+            matches: Vec::new(),
+        });
         res
     }
 
@@ -443,7 +451,11 @@ impl Solver {
         }
         Self::clear_qlauses(f);
         self.stats.factor_ticks += 1 + clauses.len() as u64;
-        f.quotients.push(Quotient { factor: next, clauses, matches });
+        f.quotients.push(Quotient {
+            factor: next,
+            clauses,
+            matches,
+        });
     }
 
     /// Returns the literals whose occurrences changed.

@@ -9,8 +9,8 @@
 
 use crate::arena::{HEADER, INVALID_REF};
 use crate::heap::Heap;
-use crate::queue::{Links, DISCONNECT};
-use crate::solver::{Assigned, Frame, Solver, ELIMINATED};
+use crate::queue::{DISCONNECT, Links};
+use crate::solver::{Assigned, ELIMINATED, Frame, Solver};
 use crate::types::{Lit, Var};
 use crate::watch::{self, Watch};
 
@@ -91,10 +91,10 @@ impl Solver {
                 continue;
             }
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w {
-                    if map[other.vidx()] != UNMAPPED {
-                        watch::push_binary(&mut watches[map_lit(lit).idx()], map_lit(other));
-                    }
+                if let Watch::Binary(other) = w
+                    && map[other.vidx()] != UNMAPPED
+                {
+                    watch::push_binary(&mut watches[map_lit(lit).idx()], map_lit(other));
                 }
             }
         }
@@ -171,7 +171,10 @@ impl Solver {
         self.recount_phase_heights();
         self.stats.compacts += 1;
         if self.verbose(2) {
-            println!("c [compact-{}] {} -> {} variables", self.stats.compacts, old_vars, n);
+            println!(
+                "c [compact-{}] {} -> {} variables",
+                self.stats.compacts, old_vars, n
+            );
         }
         true
     }

@@ -45,7 +45,13 @@ struct Bytes<R: Read> {
 
 impl<R: Read> Bytes<R> {
     fn new(reader: R) -> Self {
-        Bytes { reader: BufReader::new(reader), buf: vec![0; 1 << 16], pos: 0, len: 0, line: 1 }
+        Bytes {
+            reader: BufReader::new(reader),
+            buf: vec![0; 1 << 16],
+            pos: 0,
+            len: 0,
+            line: 1,
+        }
     }
 
     #[inline]
@@ -119,8 +125,12 @@ pub fn parse<R: Read>(
             if parts.len() != 4 || parts[1] != "cnf" {
                 return Err(err(b.line, "invalid header"));
             }
-            let vars = parts[2].parse().map_err(|_| err(b.line, "invalid variables"))?;
-            let clauses = parts[3].parse().map_err(|_| err(b.line, "invalid clauses"))?;
+            let vars = parts[2]
+                .parse()
+                .map_err(|_| err(b.line, "invalid variables"))?;
+            let clauses = parts[3]
+                .parse()
+                .map_err(|_| err(b.line, "invalid clauses"))?;
             header = Some(Header { vars, clauses });
             continue;
         }
@@ -147,10 +157,10 @@ pub fn parse<R: Read>(
         if digits == 0 {
             return Err(err(b.line, "expected literal"));
         }
-        if let Some(ch) = c {
-            if !ch.is_ascii_whitespace() {
-                return Err(err(b.line, "expected white space after literal"));
-            }
+        if let Some(ch) = c
+            && !ch.is_ascii_whitespace()
+        {
+            return Err(err(b.line, "expected white space after literal"));
         }
         if value == 0 {
             if negative {
@@ -166,7 +176,11 @@ pub fn parse<R: Read>(
             if strict && value as usize > h.vars {
                 return Err(err(b.line, "literal exceeds maximum variable"));
             }
-            lits.push(if negative { -(value as i32) } else { value as i32 });
+            lits.push(if negative {
+                -(value as i32)
+            } else {
+                value as i32
+            });
         }
     }
     let Some(h) = header else {
