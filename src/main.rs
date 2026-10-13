@@ -109,11 +109,8 @@ fn main() {
     }
 
     let input = files.first().map(String::as_str).unwrap_or("-");
-    let reader: Box<dyn io::Read> = if input == "-" {
-        Box::new(io::stdin())
-    } else {
-        dimacs::open(input).unwrap_or_else(|e| die(&format!("can not read '{input}': {e}")))
-    };
+    let reader =
+        dimacs::open(input).unwrap_or_else(|e| die(&format!("can not read '{input}': {e}")));
     let mut original: Vec<Vec<i32>> = Vec::new();
     let keep = check || threads > 1;
     let header = dimacs::parse(reader, strict, |c| {

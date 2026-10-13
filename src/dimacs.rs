@@ -1,37 +1,137 @@
-//! DIMACS CNF parser.  Compressed inputs (`.xz`, `.gz`, `.bz2`, `.lzma`)
-//! are decompressed through the corresponding external tool, like Kissat.
+//! DIMACS CNF parser.  Compressed inputs (gzip, bzip2, xz detected by their
+//! magic bytes, and `.lzma` by the file name) are decompressed with pure
+//! Rust decoders when the `compression` feature is enabled (the default).
 
 use std::fs::File;
-use std::io::{self, BufReader, Read};
-use std::process::{Command, Stdio};
+use std::io::{self, BufRead, BufReader, Read};
 
 pub struct Header {
     pub vars: usize,
     pub clauses: usize,
 }
 
-/// Open a (possibly compressed) file for reading.
+/// Open a (possibly compressed) file for reading; `-` is standard input.
 pub fn open(path: &str) -> io::Result<Box<dyn Read>> {
-    let tool = if path.ends_with(".xz") || path.ends_with(".lzma") {
-        Some("xz")
-    } else if path.ends_with(".gz") {
-        Some("gzip")
-    } else if path.ends_with(".bz2") {
-        Some("bzip2")
+    if path == "-" {
+        return decompress(BufReader::new(io::stdin()), false);
+    }
+    decompress(BufReader::new(File::open(path)?), path.ends_with(".lzma"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Format {
+    Plain,
+    Gzip,
+    Bzip2,
+    Xz,
+    Lzma,
+}
+
+fn detect(magic: &[u8], lzma: bool) -> Format {
+    if magic.starts_with(&[0x1f, 0x8b]) {
+        Format::Gzip
+    } else if magic.starts_with(b"BZh") {
+        Format::Bzip2
+    } else if magic.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0]) {
+        Format::Xz
+    } else if lzma {
+        Format::Lzma
     } else {
-        None
-    };
-    match tool {
-        Some(tool) => {
-            let child = Command::new(tool)
-                .arg("-dc")
-                .arg(path)
-                .stdout(Stdio::piped())
-                .spawn()
-                .map_err(|e| io::Error::other(format!("failed to run '{tool}': {e}")))?;
-            Ok(Box::new(child.stdout.unwrap()))
+        Format::Plain
+    }
+}
+
+/// Wrap `reader` in the decoder for its format.
+fn decompress<R: BufRead + Send + 'static>(mut reader: R, lzma: bool) -> io::Result<Box<dyn Read>> {
+    let format = detect(reader.fill_buf()?, lzma);
+    #[cfg(feature = "compression")]
+    {
+        let decoder: Box<dyn Read + Send> = match format {
+            Format::Plain => return Ok(Box::new(reader)),
+            Format::Gzip => Box::new(flate2::bufread::MultiGzDecoder::new(reader)),
+            Format::Bzip2 => Box::new(bzip2::bufread::MultiBzDecoder::new(reader)),
+            Format::Xz => Box::new(lzma_rust2::XzReader::new(reader, true)),
+            Format::Lzma => Box::new(lzma_rust2::LzmaReader::new_mem_limit(
+                reader,
+                u32::MAX,
+                None,
+            )?),
+        };
+        Ok(Box::new(Pipelined::new(decoder)))
+    }
+    #[cfg(not(feature = "compression"))]
+    match format {
+        Format::Plain => Ok(Box::new(reader)),
+        _ => Err(io::Error::other(
+            "compressed input requires the `compression` feature",
+        )),
+    }
+}
+
+/// Runs a decoder in a separate thread (decompression and parsing overlap,
+/// like a pipe from an external decompression tool).
+#[cfg(feature = "compression")]
+struct Pipelined {
+    chunks: std::sync::mpsc::Receiver<io::Result<Vec<u8>>>,
+    chunk: Vec<u8>,
+    pos: usize,
+}
+
+#[cfg(feature = "compression")]
+impl Pipelined {
+    const CHUNK: usize = 1 << 20;
+
+    fn new(mut decoder: Box<dyn Read + Send>) -> Pipelined {
+        let (send, chunks) = std::sync::mpsc::sync_channel(4);
+        std::thread::spawn(move || {
+            loop {
+                let mut chunk = vec![0; Self::CHUNK];
+                let mut len = 0;
+                // Fill the chunk (decoders may return short reads).
+                let res = loop {
+                    match decoder.read(&mut chunk[len..]) {
+                        Ok(0) => break Ok(()),
+                        Ok(n) => {
+                            len += n;
+                            if len == chunk.len() {
+                                break Ok(());
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                        Err(e) => break Err(e),
+                    }
+                };
+                chunk.truncate(len);
+                let done = len == 0 || res.is_err();
+                let msg = res.map(|()| chunk);
+                if send.send(msg).is_err() || done {
+                    return;
+                }
+            }
+        });
+        Pipelined {
+            chunks,
+            chunk: Vec::new(),
+            pos: 0,
         }
-        None => Ok(Box::new(File::open(path)?)),
+    }
+}
+
+#[cfg(feature = "compression")]
+impl Read for Pipelined {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.pos == self.chunk.len() {
+            match self.chunks.recv() {
+                Ok(chunk) => self.chunk = chunk?,
+                // The decoder thread finished.
+                Err(_) => return Ok(0),
+            }
+            self.pos = 0;
+        }
+        let n = buf.len().min(self.chunk.len() - self.pos);
+        buf[..n].copy_from_slice(&self.chunk[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
     }
 }
 
@@ -206,6 +306,33 @@ mod tests {
         let h = parse(text.as_bytes(), true, |c| clauses.push(c.to_vec())).unwrap();
         assert_eq!(h.vars, 3);
         assert_eq!(clauses, vec![vec![1, -2], vec![2, 3, -1]]);
+    }
+
+    #[test]
+    fn detect_formats() {
+        assert_eq!(detect(&[0x1f, 0x8b, 8], false), Format::Gzip);
+        assert_eq!(detect(b"BZh91AY", false), Format::Bzip2);
+        assert_eq!(
+            detect(&[0xfd, b'7', b'z', b'X', b'Z', 0], false),
+            Format::Xz
+        );
+        assert_eq!(detect(b"p cnf 1 1", true), Format::Lzma);
+        assert_eq!(detect(b"p cnf 1 1", false), Format::Plain);
+    }
+
+    #[cfg(feature = "compression")]
+    #[test]
+    fn gzip_input() {
+        use std::io::Write;
+        let text = "c test\np cnf 3 2\n1 -2 0\n2 3 0\n";
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        enc.write_all(text.as_bytes()).unwrap();
+        let data = enc.finish().unwrap();
+        let reader = decompress(io::Cursor::new(data), false).unwrap();
+        let mut clauses = Vec::new();
+        let header = parse(reader, true, |c| clauses.push(c.to_vec())).unwrap();
+        assert_eq!((header.vars, header.clauses), (3, 2));
+        assert_eq!(clauses, vec![vec![1, -2], vec![2, 3]]);
     }
 
     #[test]

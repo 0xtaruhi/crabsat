@@ -35,6 +35,10 @@ cargo build --release
 target/release/crabsat [options] <input.cnf[.xz|.gz|.bz2]> [<proof.drat>]
 ```
 
+Compressed inputs (gzip, bzip2, xz, lzma) are decoded in-process with pure
+Rust decoders (cargo feature `compression`, enabled by default), so no
+external tools are needed on Linux, macOS or Windows.
+
 The output follows the SAT competition format (`s SATISFIABLE` /
 `s UNSATISFIABLE` with exit codes 10 / 20).  Useful options:
 
