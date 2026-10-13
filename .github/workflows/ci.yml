@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           touch ipasir/src/lib.rs
-          libs=$(cargo rustc -q --release -p crabsat-ipasir --crate-type staticlib \
+          libs=$(cargo rustc -q --color never --release -p crabsat-ipasir --crate-type staticlib \
             -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
           cc -Wall -Iinclude examples/ipasir_example.c \
             target/release/libcrabsat_ipasir.a $libs -o ipasir_example
