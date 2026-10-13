@@ -17,11 +17,24 @@ impl Solver {
             return SolveResult::Unsat;
         }
         self.apply_initial_order();
+        // Kissat tries lucky assignments before and after preprocessing.
+        if self.opts.luckyearly && self.lucky_early() {
+            return SolveResult::Sat;
+        }
         if !self.preprocess() {
             return SolveResult::Unsat;
         }
-        if self.lucky() {
+        if self.opts.luckylate && self.lucky() {
             return SolveResult::Sat;
+        }
+        if self.verbose(4) {
+            let pos = self.phases.saved.iter().filter(|&&p| p > 0).count();
+            let qlast = self.queue.last;
+            let hmax = if self.heap.is_empty() { u32::MAX } else { self.heap.max() };
+            println!(
+                "c [debug] saved positive {pos} of {} queue last {qlast} search {} heap max {hmax} trail {}",
+                self.vars, self.queue.search_idx, self.trail.len()
+            );
         }
         self.start_search();
         let res = loop {

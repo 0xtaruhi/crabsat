@@ -48,9 +48,14 @@ impl Solver {
             }
             c = next;
         }
+        // Number of clauses containing the variable (independent of where
+        // large clauses happen to be watched).
         let occurrences = |s: &Solver, v: usize| {
             let p = Lit::new(v as Var, false);
-            s.watches[p.idx()].len() + s.watches[(!p).idx()].len()
+            let binaries = |l: Lit| {
+                watch::iter(&s.watches[l.idx()]).filter(|w| matches!(w, Watch::Binary(_))).count()
+            };
+            binaries(p) + binaries(!p) + occs[p.idx()].len() + occs[(!p).idx()].len()
         };
         let mut candidates: Vec<(usize, Var)> = (0..self.vars)
             .filter(|&v| self.sweepable(v) && self.flags[v] & SWEPT == 0)

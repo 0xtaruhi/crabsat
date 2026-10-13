@@ -18,9 +18,44 @@ impl Solver {
     /// Try a few simple assignments.  Returns true if one satisfies the
     /// formula (the assignment is left on the trail).
     pub fn lucky(&mut self) -> bool {
+        let start = std::time::Instant::now();
+        let res = self.lucky_untimed();
+        self.stats.time_lucky += start.elapsed().as_secs_f64();
+        res
+    }
+
+    /// Cheap lucky check before preprocessing: only the constant
+    /// assignments, which do not propagate (and thus do not perturb watches)
+    /// unless every clause is satisfied by them.
+    pub fn lucky_early(&mut self) -> bool {
         if !self.opts.lucky || self.inconsistent || !self.backtrack_propagate_root() {
             return false;
         }
+        // Propagation moves watches, reorders clause literals and touches
+        // other search state: restore everything if nothing is found.
+        let watches = self.watches.clone();
+        let arena = self.arena.mem.clone();
+        let assigned = self.assigned.clone();
+        let queue = self.queue.clone();
+        let heap = self.heap.clone();
+        let stats = self.stats.clone();
+        let found = self.lucky_untimed();
+        if !found {
+            self.watches = watches;
+            self.arena.mem = arena;
+            self.assigned = assigned;
+            self.queue = queue;
+            self.heap = heap;
+            self.stats = stats;
+        }
+        found
+    }
+
+    fn lucky_untimed(&mut self) -> bool {
+        if !self.opts.lucky || self.inconsistent || !self.backtrack_propagate_root() {
+            return false;
+        }
+
         self.probing = true;
         let found = self.lucky_constant(false)
             || self.lucky_constant(true)

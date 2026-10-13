@@ -356,6 +356,7 @@ fn print_statistics(s: &Solver) {
         ("factor", st.time_factor),
         ("walk", st.time_walk),
         ("reduce", st.time_reduce),
+        ("lucky", st.time_lucky),
         ("stable mode", st.time_stable),
         ("focused mode", st.time_focused),
     ] {

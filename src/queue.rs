@@ -21,6 +21,7 @@ impl Default for Links {
     }
 }
 
+#[derive(Clone)]
 pub struct Queue {
     pub links: Vec<Links>,
     pub first: u32,

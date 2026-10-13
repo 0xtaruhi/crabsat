@@ -158,6 +158,8 @@ options! {
     walkeffort: u64 = 50, "walk effort in per mille";
     warmup: bool = true, "initialize phases by unit propagation before walking";
     lucky: bool = true, "try some lucky assignments";
+    luckyearly: bool = true, "lucky assignments before preprocessing";
+    luckylate: bool = true, "lucky assignments after preprocessing";
     randec: bool = true, "random decisions (focused mode)";
     randecinit: u64 = 500, "initial random decisions interval";
     randecint: u64 = 500, "random decisions interval";

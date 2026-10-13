@@ -5,7 +5,7 @@ use crate::types::Var;
 
 const ABSENT: u32 = u32::MAX;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Heap {
     pub score: Vec<f64>,
     pos: Vec<u32>,
