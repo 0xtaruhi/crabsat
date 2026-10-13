@@ -4,7 +4,7 @@ use crate::types::Lit;
 use std::io::{self, BufWriter, Write};
 
 pub struct Proof {
-    out: BufWriter<Box<dyn Write>>,
+    out: BufWriter<Box<dyn Write + Send>>,
     binary: bool,
     pub added: u64,
     pub deleted: u64,
@@ -13,7 +13,7 @@ pub struct Proof {
 }
 
 impl Proof {
-    pub fn new(out: Box<dyn Write>, binary: bool) -> Proof {
+    pub fn new(out: Box<dyn Write + Send>, binary: bool) -> Proof {
         Proof {
             out: BufWriter::with_capacity(1 << 20, out),
             binary,
@@ -73,6 +73,14 @@ impl Proof {
 
     pub fn flush(&mut self) {
         self.out.flush().expect("failed to flush proof");
+    }
+}
+
+/// Solvers are only cloned for the portfolio, which does not support
+/// proofs.
+impl Clone for Proof {
+    fn clone(&self) -> Self {
+        panic!("proofs can not be cloned");
     }
 }
 

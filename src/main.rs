@@ -96,7 +96,7 @@ fn main() {
     msg("crabsat SAT solver");
 
     if let Some(path) = files.get(1) {
-        let out: Box<dyn Write> = if path == "-" {
+        let out: Box<dyn Write + Send> = if path == "-" {
             Box::new(io::stdout())
         } else {
             Box::new(
@@ -246,6 +246,9 @@ fn portfolio(
         }
     };
     main.shared = Some(shared.clone());
+    // Every member preprocesses with its own options: this is done in
+    // parallel and diversifies the simplified formulas (cloning a single
+    // preprocessed solver was measured to be worse).
     std::thread::scope(|scope| {
         for i in 1..threads {
             let shared = shared.clone();

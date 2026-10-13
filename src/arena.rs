@@ -39,7 +39,7 @@ const USED_MASK: u32 = MAX_USED << USED_SHIFT;
 
 const INVALID_LIT: u32 = u32::MAX;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Arena {
     pub mem: Vec<u32>,
 }

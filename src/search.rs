@@ -16,16 +16,8 @@ impl Solver {
             self.mark_inconsistent();
             return SolveResult::Unsat;
         }
-        self.apply_initial_order();
-        // Kissat tries lucky assignments before and after preprocessing.
-        if self.opts.luckyearly && self.lucky_early() {
-            return SolveResult::Sat;
-        }
-        if !self.preprocess() {
-            return SolveResult::Unsat;
-        }
-        if self.opts.luckylate && self.lucky() {
-            return SolveResult::Sat;
+        if let Some(res) = self.presolve() {
+            return res;
         }
         if self.verbose(4) {
             let pos = self.phases.saved.iter().filter(|&&p| p > 0).count();
@@ -113,6 +105,34 @@ impl Solver {
                 self.heap.push(v);
             }
         }
+    }
+
+    /// Initial order, lucky phases and preprocessing (once).  Returns a
+    /// result if the formula was already solved.
+    pub fn presolve(&mut self) -> Option<SolveResult> {
+        if self.presolved {
+            return None;
+        }
+        self.presolved = true;
+        if self.inconsistent {
+            return Some(SolveResult::Unsat);
+        }
+        if self.propagate().is_some() {
+            self.mark_inconsistent();
+            return Some(SolveResult::Unsat);
+        }
+        self.apply_initial_order();
+        // Kissat tries lucky assignments before and after preprocessing.
+        if self.opts.luckyearly && self.lucky_early() {
+            return Some(SolveResult::Sat);
+        }
+        if !self.preprocess() {
+            return Some(SolveResult::Unsat);
+        }
+        if self.opts.luckylate && self.lucky() {
+            return Some(SolveResult::Sat);
+        }
+        None
     }
 
     fn limit_hit(&self) -> bool {

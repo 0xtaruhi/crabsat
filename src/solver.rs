@@ -62,7 +62,7 @@ pub struct Frame {
     pub promote: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Phases {
     pub saved: Vec<i8>,
     pub target: Vec<i8>,
@@ -76,7 +76,7 @@ pub enum Conflict {
     Large(CRef),
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Limits {
     pub conflicts: Option<u64>,
     pub decisions: Option<u64>,
@@ -124,6 +124,7 @@ impl Delay {
     }
 }
 
+#[derive(Clone)]
 pub struct Solver {
     pub opts: Options,
     pub vars: usize,
@@ -219,6 +220,8 @@ pub struct Solver {
     pub export_buffer: Vec<crate::share::SharedClause>,
     pub imported_clauses: usize,
     pub last_share: u64,
+    /// Preprocessing (and the lucky phases) already ran.
+    pub presolved: bool,
     pub root_log: Option<Vec<Lit>>,
     /// Variables in order of their first occurrence in added clauses.
     pub first_seen: Vec<Var>,
@@ -312,6 +315,7 @@ impl Solver {
             export_buffer: Vec::new(),
             imported_clauses: 0,
             last_share: 0,
+            presolved: false,
             root_log: std::env::var_os("CRABSAT_CHECK_DB").map(|_| Vec::new()),
             first_seen: Vec::new(),
             seen: Vec::new(),

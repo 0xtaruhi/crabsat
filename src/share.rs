@@ -10,6 +10,7 @@ use crate::types::Lit;
 use std::sync::Mutex;
 
 /// A learned clause exported by a portfolio member (external literals).
+#[derive(Clone)]
 pub struct SharedClause {
     pub from: u32,
     pub glue: u32,
