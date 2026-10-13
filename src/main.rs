@@ -207,6 +207,25 @@ fn diversify(base: &Options, i: usize) -> Options {
     o.quiet = true;
     o.verbose = 0;
     o.check = false;
+    if base.portfolio == 1 {
+        match i % 8 {
+            1 => o.stable = 2,
+            2 => o.phase = false,
+            3 => o.target = 2,
+            4 => {
+                o.stable = 2;
+                o.phase = false;
+            }
+            5 => o.walkeffort = 150,
+            6 => {
+                o.randec = false;
+                o.reorder = 0;
+            }
+            7 => o.stable = 0,
+            _ => {}
+        }
+        return o;
+    }
     match i % 8 {
         1 => o.stable = 2,
         2 => o.stable = 0,
