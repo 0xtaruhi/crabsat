@@ -1,0 +1,17 @@
+[package]
+name = "crabsat-wasm-smoke"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Not part of the crabsat workspace (built only for wasm32-unknown-unknown).
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+crabsat = { path = "../..", default-features = false }
+
+[profile.release]
+panic = "abort"

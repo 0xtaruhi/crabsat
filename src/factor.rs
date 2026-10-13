@@ -54,9 +54,9 @@ impl Solver {
     }
 
     pub(crate) fn factor(&mut self) -> bool {
-        let start = std::time::Instant::now();
+        let start = crate::clock::Instant::now();
         let res = self.factor_untimed();
-        self.stats.time_factor += start.elapsed().as_secs_f64();
+        self.stats.time_factor += start.seconds();
         res
     }
 

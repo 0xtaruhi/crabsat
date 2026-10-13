@@ -52,9 +52,9 @@ impl Solver {
     }
 
     pub(crate) fn eliminate(&mut self) -> bool {
-        let start = std::time::Instant::now();
+        let start = crate::clock::Instant::now();
         let res = self.eliminate_untimed();
-        self.stats.time_eliminate += start.elapsed().as_secs_f64();
+        self.stats.time_eliminate += start.seconds();
         res
     }
 

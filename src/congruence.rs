@@ -99,9 +99,9 @@ impl UnionFind {
 
 impl Solver {
     pub(crate) fn congruence(&mut self) -> bool {
-        let start = std::time::Instant::now();
+        let start = crate::clock::Instant::now();
         let res = self.congruence_untimed();
-        self.stats.time_congruence += start.elapsed().as_secs_f64();
+        self.stats.time_congruence += start.seconds();
         res
     }
 
@@ -112,16 +112,13 @@ impl Solver {
             return true;
         }
         self.stats.congruences += 1;
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         let gates = self.extract_gates();
         if self.inconsistent {
             return false;
         }
         if self.verbose(3) {
-            println!(
-                "c [congruence] extract total {:.2}s",
-                t.elapsed().as_secs_f64()
-            );
+            println!("c [congruence] extract total {:.2}s", t.seconds());
         }
         if self.verbose(2) {
             let count = |k: Kind| gates.iter().filter(|g| g.kind == k).count();
@@ -137,10 +134,10 @@ impl Solver {
             self.delays.congruence.bump();
             return true;
         }
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         let equivalences = self.close_congruences(gates);
         if self.verbose(3) {
-            println!("c [congruence] closure {:.2}s", t.elapsed().as_secs_f64());
+            println!("c [congruence] closure {:.2}s", t.seconds());
         }
         let active = (self.vars as u32 - self.eliminated).max(1);
         if (equivalences as f64) / (active as f64) < 0.001 {
@@ -161,13 +158,10 @@ impl Solver {
             return true;
         }
         self.stats.congruent += equivalences as u64;
-        let t = std::time::Instant::now();
+        let t = crate::clock::Instant::now();
         let ok = self.substitute();
         if self.verbose(3) {
-            println!(
-                "c [congruence] substitute {:.2}s",
-                t.elapsed().as_secs_f64()
-            );
+            println!("c [congruence] substitute {:.2}s", t.seconds());
         }
         ok
     }
@@ -277,10 +271,10 @@ impl Solver {
 
     fn extract_gates(&mut self) -> Vec<Gate> {
         if self.opts.congruencebinaries {
-            let t = std::time::Instant::now();
+            let t = crate::clock::Instant::now();
             let n = self.extract_binaries();
             if self.verbose(3) {
-                println!("c [congruence] binaries {:.2}s", t.elapsed().as_secs_f64());
+                println!("c [congruence] binaries {:.2}s", t.seconds());
             }
             if self.verbose(2) {
                 println!(
@@ -340,33 +334,24 @@ impl Solver {
         }
         let mut gates = Vec::new();
         if self.opts.congruenceands {
-            let t = std::time::Instant::now();
+            let t = crate::clock::Instant::now();
             self.extract_and_gates(&occs, &mut gates);
             if self.verbose(3) {
-                println!(
-                    "c [congruence] extract_and_gates {:.2}s",
-                    t.elapsed().as_secs_f64()
-                );
+                println!("c [congruence] extract_and_gates {:.2}s", t.seconds());
             }
         }
         if self.opts.congruenceites {
-            let t = std::time::Instant::now();
+            let t = crate::clock::Instant::now();
             self.extract_ite_gates(&occs, &mut gates);
             if self.verbose(3) {
-                println!(
-                    "c [congruence] extract_ite_gates {:.2}s",
-                    t.elapsed().as_secs_f64()
-                );
+                println!("c [congruence] extract_ite_gates {:.2}s", t.seconds());
             }
         }
         if self.opts.congruencexors {
-            let t = std::time::Instant::now();
+            let t = crate::clock::Instant::now();
             self.extract_xor_gates(&occs, &mut gates);
             if self.verbose(3) {
-                println!(
-                    "c [congruence] extract_xor_gates {:.2}s",
-                    t.elapsed().as_secs_f64()
-                );
+                println!("c [congruence] extract_xor_gates {:.2}s", t.seconds());
             }
         }
         gates

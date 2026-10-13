@@ -48,9 +48,9 @@ impl Rng {
 
 impl Solver {
     pub(crate) fn walk(&mut self) {
-        let start = std::time::Instant::now();
+        let start = crate::clock::Instant::now();
         self.walk_untimed();
-        self.stats.time_walk += start.elapsed().as_secs_f64();
+        self.stats.time_walk += start.seconds();
     }
 
     /// Run local search and update the saved phases.  Must be called at

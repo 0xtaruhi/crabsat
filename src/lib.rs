@@ -54,6 +54,7 @@
 mod analyze;
 mod arena;
 mod backtrack;
+mod clock;
 mod compact;
 mod congruence;
 pub mod dimacs;
@@ -91,3 +92,6 @@ pub use proof::Proof;
 pub use solver::Solver;
 pub use stats::Stats;
 pub use types::SolveResult;
+
+/// The version of crabsat (`major.minor.patch`).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

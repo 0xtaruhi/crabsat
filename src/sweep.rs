@@ -18,9 +18,9 @@ struct Environment {
 
 impl Solver {
     pub(crate) fn sweep(&mut self) -> bool {
-        let start = std::time::Instant::now();
+        let start = crate::clock::Instant::now();
         let res = self.sweep_untimed();
-        self.stats.time_sweep += start.elapsed().as_secs_f64();
+        self.stats.time_sweep += start.seconds();
         res
     }
 

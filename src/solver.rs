@@ -220,7 +220,7 @@ pub struct Solver {
     pub(crate) limits: Limits,
     pub(crate) stats: Stats,
     pub(crate) proof: Option<Proof>,
-    pub(crate) start_time: std::time::Instant,
+    pub(crate) start_time: crate::clock::Instant,
     pub(crate) terminate: Option<Arc<AtomicBool>>,
     /// Preprocessing (and the lucky phases) already ran.
     pub(crate) presolved: bool,
@@ -287,7 +287,7 @@ impl Solver {
             limits: Limits::default(),
             stats: Stats::default(),
             proof: None,
-            start_time: std::time::Instant::now(),
+            start_time: crate::clock::Instant::now(),
             terminate: None,
             presolved: false,
             first_seen: Vec::new(),
@@ -833,7 +833,7 @@ impl Solver {
 
     /// Seconds since the solver was created.
     pub fn seconds(&self) -> f64 {
-        self.start_time.elapsed().as_secs_f64()
+        self.start_time.seconds()
     }
 
     pub(crate) fn verbose(&self, level: u32) -> bool {

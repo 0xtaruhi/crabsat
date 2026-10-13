@@ -56,6 +56,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --release --workspace
 
+  wasm:
+    name: WebAssembly (wasm32-unknown-unknown, run with Node.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Smoke test
+        working-directory: ci/wasm-smoke
+        run: |
+          cargo build --release --target wasm32-unknown-unknown
+          node run.mjs target/wasm32-unknown-unknown/release/crabsat_wasm_smoke.wasm
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest

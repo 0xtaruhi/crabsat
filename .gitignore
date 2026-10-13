@@ -1,3 +1,4 @@
 target/
 *.drat
 *.proof
+/ci/wasm-smoke/Cargo.lock

@@ -14,9 +14,9 @@ impl Solver {
     }
 
     pub(crate) fn reduce(&mut self) {
-        let start = std::time::Instant::now();
+        let start = crate::clock::Instant::now();
         self.reduce_untimed();
-        self.stats.time_reduce += start.elapsed().as_secs_f64();
+        self.stats.time_reduce += start.seconds();
     }
 
     fn reduce_untimed(&mut self) {

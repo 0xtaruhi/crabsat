@@ -104,7 +104,10 @@ with all inprocessing enabled except bounded variable addition: variables
 removed by elimination or substitution are reactivated (with their saved
 clauses) when used again.  `Options { incremental: false, .. }` selects the
 one-shot mode of the command line solver.  The minimum supported Rust
-version is 1.87.
+version is 1.87.  The library builds for WebAssembly
+(`wasm32-unknown-unknown` with `default-features = false`; CI runs a smoke
+test with Node.js); times in the statistics are zero there, and the
+portfolio needs threads.
 
 ### C (IPASIR)
 

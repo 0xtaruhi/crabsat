@@ -1,6 +1,6 @@
 [package]
 name = "crabsat"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.87"
 description = "A high-performance CDCL SAT solver inspired by Kissat"
@@ -10,7 +10,7 @@ readme = "README.md"
 documentation = "https://docs.rs/crabsat"
 keywords = ["sat", "sat-solver", "cdcl", "ipasir", "incremental"]
 categories = ["algorithms", "mathematics", "command-line-utilities"]
-exclude = ["/.github", "/scripts", "/ipasir", "/include", "/examples"]
+exclude = ["/.github", "/scripts", "/ipasir", "/include", "/examples", "/ci"]
 
 [workspace]
 members = ["ipasir"]
