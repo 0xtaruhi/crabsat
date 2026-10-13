@@ -481,7 +481,7 @@ impl Solver {
             self.opts.vivifyirr,
         ];
         let sum: u64 = shares.iter().sum::<u64>().max(1);
-        let irr_delayed = self.delay_vivifyirr.delaying();
+        let irr_delayed = self.delays.vivifyirr.delaying();
         for (tier, share) in shares.iter().enumerate() {
             if *share == 0 || (tier == 3 && irr_delayed) {
                 continue;
@@ -516,9 +516,9 @@ impl Solver {
             if tier == 3 {
                 let tried = (self.stats.vivify_checks - checks_before).max(1);
                 if ((self.stats.vivified - vivified_before) as f64) / (tried as f64) < 0.01 {
-                    self.delay_vivifyirr.bump();
+                    self.delays.vivifyirr.bump();
                 } else {
-                    self.delay_vivifyirr.reduce();
+                    self.delays.vivifyirr.reduce();
                 }
             }
         }

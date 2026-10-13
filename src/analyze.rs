@@ -9,6 +9,22 @@ use crate::solver::{
 use crate::stats::MAX_GLUE_USED;
 use crate::types::{Lit, Var};
 
+/// Scratch space of conflict analysis.
+#[derive(Default)]
+pub struct Analysis {
+    /// The clause being learned.
+    pub clause: Vec<Lit>,
+    pub levels: Vec<u32>,
+    pub analyzed: Vec<Var>,
+    pub removable: Vec<Var>,
+    pub poisoned: Vec<Var>,
+    pub shrinkable: Vec<Var>,
+    pub minimize_stack: Vec<Var>,
+    pub promote_levels: Vec<u32>,
+    pub antecedent_size: u32,
+    pub resolvent_size: u32,
+}
+
 const MAX_SCORE: f64 = 1e150;
 
 impl Solver {
@@ -50,7 +66,7 @@ impl Solver {
                     self.update_tier_limits();
                 }
             }
-            if !self.analyzed.is_empty() {
+            if !self.analysis.analyzed.is_empty() {
                 if self.opts.bump {
                     self.bump_analyzed();
                 }
@@ -171,7 +187,7 @@ impl Solver {
         let a = &mut self.assigned[v as usize];
         debug_assert!(!a.has(ANALYZED));
         a.flags.insert(ANALYZED);
-        self.analyzed.push(v);
+        self.analysis.analyzed.push(v);
     }
 
     /// Returns true if the literal is on the current decision level.
@@ -181,20 +197,20 @@ impl Solver {
         if a.level == 0 {
             return false;
         }
-        self.antecedent_size += 1;
+        self.analysis.antecedent_size += 1;
         if a.has(ANALYZED) {
             return false;
         }
         self.push_analyzed(lit.var());
-        self.resolvent_size += 1;
+        self.analysis.resolvent_size += 1;
         if a.level == self.level {
             return true;
         }
-        self.clause.push(lit);
+        self.analysis.clause.push(lit);
         let f = &mut self.frames[a.level as usize];
         f.used += 1;
         if f.used == 1 {
-            self.levels.push(a.level);
+            self.analysis.levels.push(a.level);
         }
         false
     }
@@ -213,12 +229,12 @@ impl Solver {
                 break;
             }
             f.promote = true;
-            self.promote_levels.push(level);
+            self.analysis.promote_levels.push(level);
         }
-        for &level in &self.promote_levels {
+        for &level in &self.analysis.promote_levels {
             self.frames[level as usize].promote = false;
         }
-        self.promote_levels.clear();
+        self.analysis.promote_levels.clear();
         res
     }
 
@@ -237,13 +253,13 @@ impl Solver {
         self.stats.used[self.stable as usize][glue] += 1;
     }
 
-    /// Derive the first UIP clause into `self.clause`.  Returns a new
+    /// Derive the first UIP clause into `self.analysis.clause`.  Returns a new
     /// conflict if a reason clause was strengthened on-the-fly instead.
     fn deduce_first_uip_clause(&mut self, conflict: Conflict) -> Option<Conflict> {
-        debug_assert!(self.clause.is_empty());
-        self.clause.push(Lit::INVALID);
-        self.antecedent_size = 0;
-        self.resolvent_size = 0;
+        debug_assert!(self.analysis.clause.is_empty());
+        self.analysis.clause.push(Lit::INVALID);
+        self.analysis.antecedent_size = 0;
+        self.analysis.resolvent_size = 0;
         let mut unresolved = 0u32;
         match conflict {
             Conflict::Binary(a, b) => {
@@ -258,7 +274,7 @@ impl Solver {
                 }
             }
         }
-        let conflict_size = self.antecedent_size;
+        let conflict_size = self.analysis.antecedent_size;
         let mut resolved = 0;
         let mut t = self.trail.len();
         let uip;
@@ -275,7 +291,7 @@ impl Solver {
                 uip = lit;
                 break;
             }
-            self.antecedent_size = 1;
+            self.analysis.antecedent_size = 1;
             resolved += 1;
             if a.has(BINARY) {
                 unresolved += self.analyze_literal(Lit(a.reason)) as u32;
@@ -291,16 +307,16 @@ impl Solver {
                 self.mark_clause_as_used(c);
             }
             unresolved -= 1;
-            self.resolvent_size -= 1;
+            self.analysis.resolvent_size -= 1;
             if self.opts.otfs
-                && self.antecedent_size > 2
-                && self.resolvent_size < self.antecedent_size
+                && self.analysis.antecedent_size > 2
+                && self.analysis.resolvent_size < self.analysis.antecedent_size
             {
                 // The resolvent is the reason without `lit`.
                 let reason = a.reason;
                 let strengthened = self.on_the_fly_strengthen(reason, lit);
                 if resolved == 1
-                    && self.resolvent_size < conflict_size
+                    && self.analysis.resolvent_size < conflict_size
                     && let Conflict::Large(d) = conflict
                     && !self.arena.garbage(d)
                     && d != reason
@@ -310,8 +326,8 @@ impl Solver {
                 return Some(strengthened);
             }
         }
-        self.clause[0] = !uip;
-        self.stats.literals_deduced += self.clause.len() as u64;
+        self.analysis.clause[0] = !uip;
+        self.stats.literals_deduced += self.analysis.clause.len() as u64;
         None
     }
 
@@ -396,19 +412,20 @@ impl Solver {
     /// Sort literals after the UIP by decreasing level (needed by shrinking).
     fn sort_deduced_clause(&mut self) {
         let assigned = &self.assigned;
-        self.clause[1..].sort_unstable_by_key(|l| std::cmp::Reverse(assigned[l.vidx()].level));
+        self.analysis.clause[1..]
+            .sort_unstable_by_key(|l| std::cmp::Reverse(assigned[l.vidx()].level));
     }
 
     #[inline]
     fn push_removable(&mut self, v: Var) {
         self.assigned[v as usize].flags.insert(REMOVABLE);
-        self.removable.push(v);
+        self.analysis.removable.push(v);
     }
 
     #[inline]
     fn push_poisoned(&mut self, v: Var) {
         self.assigned[v as usize].flags.insert(POISONED);
-        self.poisoned.push(v);
+        self.analysis.poisoned.push(v);
     }
 
     /// 1 = removable, -1 = not removable, 0 = needs recursion.
@@ -446,7 +463,7 @@ impl Solver {
     }
 
     fn minimize_binary(&mut self, minimizing: bool, lit: Lit, depth: u32) -> bool {
-        let saved = self.minimize_stack.len();
+        let saved = self.analysis.minimize_stack.len();
         let mut next = lit;
         let res;
         loop {
@@ -456,7 +473,7 @@ impl Solver {
                 res = tmp > 0;
                 break;
             }
-            self.minimize_stack.push(v);
+            self.analysis.minimize_stack.push(v);
             let a = self.assigned[v as usize];
             if !a.has(BINARY) {
                 res = self.minimize_reference(minimizing, a.reason, next, depth.saturating_add(1));
@@ -464,15 +481,15 @@ impl Solver {
             }
             next = Lit(a.reason);
         }
-        for i in saved..self.minimize_stack.len() {
-            let v = self.minimize_stack[i];
+        for i in saved..self.analysis.minimize_stack.len() {
+            let v = self.analysis.minimize_stack[i];
             if res {
                 self.push_removable(v);
             } else {
                 self.push_poisoned(v);
             }
         }
-        self.minimize_stack.truncate(saved);
+        self.analysis.minimize_stack.truncate(saved);
         res
     }
 
@@ -506,29 +523,29 @@ impl Solver {
     }
 
     fn reset_poisoned(&mut self) {
-        for &v in &self.poisoned {
+        for &v in &self.analysis.poisoned {
             self.assigned[v as usize].flags.remove(POISONED);
         }
-        self.poisoned.clear();
+        self.analysis.poisoned.clear();
     }
 
     fn minimize_clause(&mut self) {
-        for i in 0..self.clause.len() {
-            let v = self.clause[i].var();
+        for i in 0..self.analysis.clause.len() {
+            let v = self.analysis.clause[i].var();
             self.push_removable(v);
         }
         if self.opts.shrink > 2 {
             return;
         }
         let mut minimized = 0;
-        for i in (1..self.clause.len()).rev() {
-            let lit = self.clause[i];
+        for i in (1..self.analysis.clause.len()).rev() {
+            let lit = self.analysis.clause[i];
             if self.minimize_literal(true, lit, 0) {
-                self.clause[i] = Lit::INVALID;
+                self.analysis.clause[i] = Lit::INVALID;
                 minimized += 1;
             }
         }
-        self.clause.retain(|&l| l != Lit::INVALID);
+        self.analysis.clause.retain(|&l| l != Lit::INVALID);
         self.stats.literals_minimized += minimized;
         self.reset_poisoned();
     }
@@ -537,13 +554,13 @@ impl Solver {
     // Shrinking (Kissat `shrink.c`).
 
     fn reset_shrinkable(&mut self) {
-        while let Some(v) = self.shrinkable.pop() {
+        while let Some(v) = self.analysis.shrinkable.pop() {
             self.assigned[v as usize].flags.remove(SHRINKABLE);
         }
     }
 
     fn mark_shrinkable_as_removable(&mut self) {
-        while let Some(v) = self.shrinkable.pop() {
+        while let Some(v) = self.analysis.shrinkable.pop() {
             let a = &mut self.assigned[v as usize];
             a.flags.remove(SHRINKABLE);
             if !a.has(REMOVABLE) {
@@ -570,7 +587,7 @@ impl Solver {
             return -1;
         }
         self.assigned[v as usize].flags.insert(SHRINKABLE);
-        self.shrinkable.push(v);
+        self.analysis.shrinkable.push(v);
         1
     }
 
@@ -605,7 +622,7 @@ impl Solver {
     fn shrink_block(&mut self, begin: usize, end: usize, level: u32, max_trail: usize) -> u64 {
         let mut open = (end - begin) as u32;
         for i in begin..end {
-            let lit = self.clause[i];
+            let lit = self.analysis.clause[i];
             self.shrink_literal(level, lit);
         }
         let mut t = max_trail;
@@ -636,12 +653,12 @@ impl Solver {
         // Replace the whole block by the negation of its UIP.
         let mut shrunken = 0;
         for i in begin..end {
-            if self.clause[i] != Lit::INVALID {
-                self.clause[i] = Lit::INVALID;
+            if self.analysis.clause[i] != Lit::INVALID {
+                self.analysis.clause[i] = Lit::INVALID;
                 shrunken += 1;
             }
         }
-        self.clause[begin] = !uip;
+        self.analysis.clause[begin] = !uip;
         shrunken -= 1;
         let uv = uip.var();
         if !self.assigned[uv as usize].has(ANALYZED) {
@@ -654,9 +671,9 @@ impl Solver {
     fn minimize_block(&mut self, begin: usize, end: usize) -> u64 {
         let mut minimized = 0;
         for i in begin..end {
-            let lit = self.clause[i];
+            let lit = self.analysis.clause[i];
             if self.minimize_literal(false, lit, 0) {
-                self.clause[i] = Lit::INVALID;
+                self.analysis.clause[i] = Lit::INVALID;
                 minimized += 1;
             }
         }
@@ -664,7 +681,7 @@ impl Solver {
     }
 
     fn shrink_clause(&mut self) {
-        let mut end_block = self.clause.len();
+        let mut end_block = self.analysis.clause.len();
         let mut total_shrunken = 0;
         let mut total_minimized = 0;
         while end_block > 0 {
@@ -673,7 +690,7 @@ impl Solver {
             let mut max_trail = 0usize;
             let mut begin_block = end_block;
             while begin_block > 0 {
-                let lit = self.clause[begin_block - 1];
+                let lit = self.analysis.clause[begin_block - 1];
                 let a = self.assigned[lit.vidx()];
                 if level == INVALID_LEVEL {
                     level = a.level;
@@ -694,7 +711,7 @@ impl Solver {
             }
             end_block = begin_block;
         }
-        self.clause.retain(|&l| l != Lit::INVALID);
+        self.analysis.clause.retain(|&l| l != Lit::INVALID);
         self.stats.literals_shrunken += total_shrunken;
         self.stats.literals_minimized += total_minimized;
         self.reset_poisoned();
@@ -706,17 +723,17 @@ impl Solver {
         if !self.opts.bump || !self.opts.bumpreasons {
             return;
         }
-        if self.delay_bumpreasons.delaying() {
+        if self.delays.bumpreasons.delaying() {
             return;
         }
         let rate = self.averages[self.stable as usize].decision_rate.value;
         if rate >= self.opts.bumpreasonsrate as f64 {
             return;
         }
-        let saved = self.analyzed.len();
+        let saved = self.analysis.analyzed.len();
         let limit = self.opts.bumpreasonslimit as usize * saved;
-        'outer: for i in 0..self.clause.len() {
-            let lit = self.clause[i];
+        'outer: for i in 0..self.analysis.clause.len() {
+            let lit = self.analysis.clause[i];
             let a = self.assigned[lit.vidx()];
             if a.reason == DECISION_REASON && !a.has(BINARY) {
                 continue;
@@ -729,24 +746,24 @@ impl Solver {
                     let other = self.arena.lits(a.reason)[j];
                     if other != not_lit {
                         self.mark_reason_side_literal(other);
-                        if self.analyzed.len() > limit {
+                        if self.analysis.analyzed.len() > limit {
                             break 'outer;
                         }
                     }
                 }
             }
-            if self.analyzed.len() > limit {
+            if self.analysis.analyzed.len() > limit {
                 break;
             }
         }
-        if self.analyzed.len() > limit {
-            while self.analyzed.len() > saved {
-                let v = self.analyzed.pop().unwrap();
+        if self.analysis.analyzed.len() > limit {
+            while self.analysis.analyzed.len() > saved {
+                let v = self.analysis.analyzed.pop().unwrap();
                 self.assigned[v as usize].flags.remove(ANALYZED);
             }
-            self.delay_bumpreasons.bump();
+            self.delays.bumpreasons.bump();
         } else {
-            self.delay_bumpreasons.reduce();
+            self.delays.bumpreasons.reduce();
         }
     }
 
@@ -786,18 +803,18 @@ impl Solver {
     }
 
     fn learn_clause(&mut self) {
-        let not_uip = self.clause[0];
-        let size = self.clause.len();
-        let glue = self.levels.len() as u32;
-        if self.learn_cb.is_some() {
-            let lits = std::mem::take(&mut self.clause);
+        let not_uip = self.analysis.clause[0];
+        let size = self.analysis.clause.len();
+        let glue = self.analysis.levels.len() as u32;
+        if self.incremental.learn.is_some() {
+            let lits = std::mem::take(&mut self.analysis.clause);
             self.learn_callback(&lits);
-            self.clause = lits;
+            self.analysis.clause = lits;
         }
-        if self.shared.is_some() && size >= 2 {
-            let lits = std::mem::take(&mut self.clause);
+        if self.sharing.pool.is_some() && size >= 2 {
+            let lits = std::mem::take(&mut self.analysis.clause);
             self.export_clause(&lits, glue);
-            self.clause = lits;
+            self.analysis.clause = lits;
         }
         self.update_learned(glue, size);
         let mut learned = INVALID_REF;
@@ -808,7 +825,7 @@ impl Solver {
             self.iterating = true;
             self.stats.iterations += 1;
         } else if size == 2 {
-            let other = self.clause[1];
+            let other = self.analysis.clause[1];
             let jump = self.level_of(other);
             let new_level = self.determine_new_level(jump);
             self.backtrack_after_conflict(new_level);
@@ -821,9 +838,9 @@ impl Solver {
             // Put the literal with the highest level at position 1.
             let back = self.level - 1;
             let mut pos = 1;
-            let mut jump_level = self.level_of(self.clause[1]);
+            let mut jump_level = self.level_of(self.analysis.clause[1]);
             for i in 2..size {
-                let level = self.level_of(self.clause[i]);
+                let level = self.level_of(self.analysis.clause[i]);
                 if jump_level >= level {
                     continue;
                 }
@@ -833,13 +850,13 @@ impl Solver {
                     break;
                 }
             }
-            self.clause.swap(1, pos);
-            let lits = std::mem::take(&mut self.clause);
+            self.analysis.clause.swap(1, pos);
+            let lits = std::mem::take(&mut self.analysis.clause);
             if let Some(p) = self.proof.as_mut() {
                 p.add(&lits);
             }
             let c = self.new_large(&lits, true, glue);
-            self.clause = lits;
+            self.analysis.clause = lits;
             self.arena.set_used(c, MAX_USED);
             let new_level = self.determine_new_level(jump_level);
             self.backtrack_after_conflict(new_level);
@@ -865,10 +882,10 @@ impl Solver {
     }
 
     fn eagerly_subsume_last_learned(&mut self) {
-        for &lit in &self.clause {
+        for &lit in &self.analysis.clause {
             self.marks[lit.idx()] = 1;
         }
-        let clause_size = self.clause.len();
+        let clause_size = self.analysis.clause.len();
         for k in 0..self.last_learned.len() {
             let c = self.last_learned[k];
             if c == INVALID_REF {
@@ -902,29 +919,29 @@ impl Solver {
             self.last_learned[k] = INVALID_REF;
             self.stats.eagerly_subsumed += 1;
         }
-        for &lit in &self.clause {
+        for &lit in &self.analysis.clause {
             self.marks[lit.idx()] = 0;
         }
         self.last_learned.sort_by_key(|&c| c == INVALID_REF);
     }
 
     fn reset_analysis_but_not_analyzed_literals(&mut self) {
-        for &v in &self.removable {
+        for &v in &self.analysis.removable {
             self.assigned[v as usize].flags.remove(REMOVABLE);
         }
-        self.removable.clear();
-        for &level in &self.levels {
+        self.analysis.removable.clear();
+        for &level in &self.analysis.levels {
             self.frames[level as usize].used = 0;
         }
-        self.levels.clear();
-        self.clause.clear();
+        self.analysis.levels.clear();
+        self.analysis.clause.clear();
     }
 
     fn reset_analyzed(&mut self) {
-        for &v in &self.analyzed {
+        for &v in &self.analysis.analyzed {
             self.assigned[v as usize].flags.remove(ANALYZED);
         }
-        self.analyzed.clear();
+        self.analysis.analyzed.clear();
     }
 
     pub(crate) fn update_tier_limits(&mut self) {
@@ -991,20 +1008,20 @@ impl Solver {
 
     fn bump_analyzed(&mut self) {
         if self.stable {
-            for i in 0..self.analyzed.len() {
-                let v = self.analyzed[i];
+            for i in 0..self.analysis.analyzed.len() {
+                let v = self.analysis.analyzed[i];
                 self.bump_variable_score(v);
             }
             self.bump_score_increment();
         } else {
-            let mut ranked = std::mem::take(&mut self.analyzed);
+            let mut ranked = std::mem::take(&mut self.analysis.analyzed);
             let links = &self.queue.links;
             ranked.sort_unstable_by_key(|&v| links[v as usize].stamp);
             for &v in &ranked {
                 let assigned = self.values[Lit::new(v, false).idx()] != 0;
                 self.queue.move_to_front(v, assigned);
             }
-            self.analyzed = ranked;
+            self.analysis.analyzed = ranked;
         }
     }
 

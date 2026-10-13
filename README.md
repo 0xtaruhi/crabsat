@@ -90,7 +90,12 @@ cc -Iinclude examples/ipasir_example.c target/release/libcrabsat_ipasir.a \
     -lpthread -ldl -lm -o example
 ```
 
-`target/release/libcrabsat_ipasir.so` is built as well.  All inprocessing
+This links the static library on Linux; the shared library
+(`libcrabsat_ipasir.so` / `.dylib`, `crabsat_ipasir.dll`) is built as well,
+and `cargo rustc --release -p crabsat-ipasir --crate-type staticlib --
+--print native-static-libs` prints the system libraries needed for static
+linking on other platforms.  CI builds and runs the example on Linux, macOS
+and Windows.  All inprocessing
 stays enabled in incremental mode except bounded variable addition: variables
 of assumptions are frozen during a call, and variables removed by elimination
 or substitution are reactivated (with their saved clauses) when later clauses

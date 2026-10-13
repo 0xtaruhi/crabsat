@@ -32,7 +32,7 @@ impl Solver {
     pub(crate) fn compact(&mut self) -> bool {
         debug_assert_eq!(self.level, 0);
         // Export pending units and remove root-level literals from clauses.
-        if self.shared.is_some() && !self.share_units() {
+        if self.sharing.pool.is_some() && !self.share_units() {
             return false;
         }
         // Repeat until propagation finds no new units (which would leave
@@ -51,16 +51,16 @@ impl Solver {
         let mut map = vec![UNMAPPED; old_vars];
         let mut new_i2e: Vec<u32> = Vec::new();
         for v in 0..old_vars {
-            let e = self.i2e[v] as usize;
+            let e = self.ext.i2e[v] as usize;
             let value = self.values[2 * v];
             if self.flags[v].has(ELIMINATED) {
-                self.e2i[e] = Lit::INVALID;
+                self.ext.e2i[e] = Lit::INVALID;
             } else if value != 0 {
-                self.ext_fixed[e] = value;
-                self.e2i[e] = Lit::INVALID;
+                self.ext.fixed[e] = value;
+                self.ext.e2i[e] = Lit::INVALID;
             } else {
                 map[v] = new_i2e.len() as u32;
-                self.e2i[e] = Lit::new(map[v], false);
+                self.ext.e2i[e] = Lit::new(map[v], false);
                 new_i2e.push(e as u32);
             }
         }
@@ -155,10 +155,10 @@ impl Solver {
         self.vars = n;
         self.unassigned = n as u32;
         self.eliminated = 0;
-        self.exported = 0;
-        self.i2e = new_i2e;
+        self.sharing.exported = 0;
+        self.ext.i2e = new_i2e;
         if let Some(p) = self.proof.as_mut() {
-            p.map = self.i2e.clone();
+            p.map = self.ext.i2e.clone();
         }
         for l in self.last_learned.iter_mut() {
             *l = INVALID_REF;

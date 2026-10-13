@@ -1,8 +1,10 @@
 /* IPASIR: reentrant incremental SAT solver API (implemented by crabsat).
  *
- * Build with `cargo build --release -p crabsat-ipasir` and link with
- * target/release/libcrabsat_ipasir.a (plus -lpthread -ldl -lm) or
- * target/release/libcrabsat_ipasir.so.
+ * Build with `cargo build --release -p crabsat-ipasir` and link with the
+ * static library (target/release/libcrabsat_ipasir.a, or crabsat_ipasir.lib
+ * on Windows, plus the system libraries printed by `cargo rustc --release
+ * -p crabsat-ipasir --crate-type staticlib -- --print native-static-libs`)
+ * or the shared library (libcrabsat_ipasir.so / .dylib, crabsat_ipasir.dll).
  */
 #ifndef ipasir_h_INCLUDED
 #define ipasir_h_INCLUDED

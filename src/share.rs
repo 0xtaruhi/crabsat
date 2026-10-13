@@ -9,6 +9,22 @@ use crate::solver::{ELIMINATED, Solver};
 use crate::types::Lit;
 use std::sync::Mutex;
 
+/// Sharing state of one portfolio member.
+#[derive(Default)]
+pub struct Sharing {
+    pub pool: Option<std::sync::Arc<Shared>>,
+    /// Member index.
+    pub id: u32,
+    /// Trail position up to which units were exported.
+    pub exported: usize,
+    /// Number of units imported from the pool.
+    pub imported: usize,
+    pub export_buffer: Vec<SharedClause>,
+    pub imported_clauses: usize,
+    /// Conflicts at the last exchange.
+    pub last: u64,
+}
+
 /// A learned clause exported by a portfolio member (external literals).
 #[derive(Clone)]
 pub struct SharedClause {
@@ -48,7 +64,7 @@ impl Solver {
     /// Remember a learned clause for export (if short with small glue and
     /// only on original variables).
     pub(crate) fn export_clause(&mut self, lits: &[Lit], glue: u32) {
-        let Some(shared) = self.shared.as_ref() else {
+        let Some(shared) = self.sharing.pool.as_ref() else {
             return;
         };
         if lits.len() > self.opts.sharesize as usize || glue > self.opts.shareglue {
@@ -62,8 +78,8 @@ impl Solver {
             }
             ext.push(e);
         }
-        self.export_buffer.push(SharedClause {
-            from: self.share_id,
+        self.sharing.export_buffer.push(SharedClause {
+            from: self.sharing.id,
             glue,
             lits: ext,
         });
@@ -72,27 +88,27 @@ impl Solver {
     /// Exchange learned clauses (called at restarts).  Imported clauses are
     /// added at the root level.  Returns false on inconsistency.
     pub(crate) fn share_clauses(&mut self) -> bool {
-        let Some(shared) = self.shared.clone() else {
+        let Some(shared) = self.sharing.pool.clone() else {
             return true;
         };
-        if !self.opts.share || self.stats.conflicts < self.last_share + self.opts.shareint {
+        if !self.opts.share || self.stats.conflicts < self.sharing.last + self.opts.shareint {
             return true;
         }
-        self.last_share = self.stats.conflicts;
+        self.sharing.last = self.stats.conflicts;
         let mut new: Vec<SharedClause> = Vec::new();
         {
             let mut pool = shared.clauses.lock().unwrap();
-            for c in self.export_buffer.drain(..) {
+            for c in self.sharing.export_buffer.drain(..) {
                 pool.clauses.push_back(c);
                 if pool.clauses.len() > POOL_CAPACITY {
                     pool.clauses.pop_front();
                     pool.base += 1;
                 }
             }
-            let start = self.imported_clauses.max(pool.base);
+            let start = self.sharing.imported_clauses.max(pool.base);
             for k in start - pool.base..pool.clauses.len() {
                 let c = &pool.clauses[k];
-                if c.from != self.share_id {
+                if c.from != self.sharing.id {
                     new.push(SharedClause {
                         from: c.from,
                         glue: c.glue,
@@ -100,7 +116,7 @@ impl Solver {
                     });
                 }
             }
-            self.imported_clauses = pool.base + pool.clauses.len();
+            self.sharing.imported_clauses = pool.base + pool.clauses.len();
         }
         if new.is_empty() {
             return true;
@@ -124,7 +140,7 @@ impl Solver {
                         }
                     }
                     None => {
-                        let v = self.ext_fixed[e.vidx()];
+                        let v = self.ext.fixed[e.vidx()];
                         if v == 0 {
                             continue 'clauses; // eliminated
                         }
@@ -163,21 +179,21 @@ impl Solver {
     /// Must be called at level 0 after propagation.  Returns false if the
     /// formula became inconsistent.
     pub(crate) fn share_units(&mut self) -> bool {
-        let Some(shared) = self.shared.clone() else {
+        let Some(shared) = self.sharing.pool.clone() else {
             return true;
         };
         debug_assert_eq!(self.level, 0);
         let mut units = shared.units.lock().unwrap();
         // Units are exchanged as external literals.
-        while self.exported < self.trail.len() {
-            let lit = self.external(self.trail[self.exported]);
-            self.exported += 1;
+        while self.sharing.exported < self.trail.len() {
+            let lit = self.external(self.trail[self.sharing.exported]);
+            self.sharing.exported += 1;
             if lit.vidx() < shared.vars {
                 units.push(lit);
             }
         }
-        let new: Vec<Lit> = units[self.imported.min(units.len())..].to_vec();
-        self.imported = units.len();
+        let new: Vec<Lit> = units[self.sharing.imported.min(units.len())..].to_vec();
+        self.sharing.imported = units.len();
         drop(units);
         let mut assigned = false;
         for ext in new {

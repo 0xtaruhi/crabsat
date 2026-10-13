@@ -10,8 +10,12 @@ env:
 
 jobs:
   check:
-    name: Format, lint and test
-    runs-on: ubuntu-latest
+    name: Lint and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -20,13 +24,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
+      - run: cargo clippy --release --no-default-features --all-targets -- -D warnings
       - run: cargo test --release
-      - name: IPASIR C example
+      - name: IPASIR C example (static library)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          touch ipasir/src/lib.rs
+          libs=$(cargo rustc -q --release -p crabsat-ipasir --crate-type staticlib \
+            -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
+          cc -Wall -Iinclude examples/ipasir_example.c \
+            target/release/libcrabsat_ipasir.a $libs -o ipasir_example
+          ./ipasir_example
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: IPASIR C example (DLL)
+        if: runner.os == 'Windows'
+        shell: cmd
         run: |
           cargo build --release -p crabsat-ipasir
-          cc -Wall -Iinclude examples/ipasir_example.c \
-            target/release/libcrabsat_ipasir.a -lpthread -ldl -lm -o ipasir_example
-          ./ipasir_example
+          cl /nologo /W3 /Iinclude examples\ipasir_example.c target\release\crabsat_ipasir.dll.lib /Fe:ipasir_example.exe
+          copy target\release\crabsat_ipasir.dll .
+          ipasir_example.exe
 
   fuzz:
     name: Differential fuzzing (models and DRAT proofs)

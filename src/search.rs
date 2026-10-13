@@ -48,14 +48,14 @@ impl Solver {
                 self.report('i');
             } else if self.unassigned == 0 {
                 // Remaining assumptions are already assigned (true or false).
-                if self.level as usize >= self.assumptions.len() {
+                if self.level as usize >= self.incremental.assumptions.len() {
                     break SolveResult::Sat;
                 } else if !self.decide() {
                     break SolveResult::Unsat;
                 }
             } else if self.terminated() || self.limit_hit() {
                 break SolveResult::Unknown;
-            } else if self.level == 0 && self.shared.is_some() && !self.share_units() {
+            } else if self.level == 0 && self.sharing.pool.is_some() && !self.share_units() {
                 break SolveResult::Unsat;
             } else if self.reducing() {
                 self.reduce();
@@ -134,7 +134,7 @@ impl Solver {
         self.apply_initial_order();
         // Kissat tries lucky assignments before and after preprocessing
         // (not with assumptions, which lucky assignments ignore).
-        let lucky = self.assumptions.is_empty();
+        let lucky = self.incremental.assumptions.is_empty();
         if lucky && self.opts.luckyearly && self.lucky_early() {
             return Some(SolveResult::Sat);
         }
@@ -336,7 +336,7 @@ impl Solver {
         }
         let next = self.next_decision_variable();
         // Assumption levels are always kept.
-        let mut res = (self.assumptions.len() as u32).min(self.level);
+        let mut res = (self.incremental.assumptions.len() as u32).min(self.level);
         if self.stable {
             let limit = self.heap.score[next as usize];
             while res < self.level {
@@ -362,7 +362,7 @@ impl Solver {
 
     fn restart(&mut self) {
         self.stats.restarts += 1;
-        if self.shared.is_some() {
+        if self.sharing.pool.is_some() {
             if !self.share_clauses() {
                 return;
             }

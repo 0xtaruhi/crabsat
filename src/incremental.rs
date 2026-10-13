@@ -18,6 +18,20 @@ use crate::types::{Lit, Var};
 
 use crate::flags::FROZEN;
 
+/// State of the incremental interface.
+#[derive(Default)]
+pub struct Incremental {
+    /// Assumptions (external literals) for the next solve call.
+    pub assumptions: Vec<Lit>,
+    /// Failed assumptions of the last unsatisfiable call.
+    pub failed: Vec<Lit>,
+    /// Model of the last satisfiable call (in incremental mode).
+    pub model: Vec<i32>,
+    pub terminate: Option<TerminateFn>,
+    pub learn: Option<(usize, LearnFn)>,
+    pub terminate_calls: std::cell::Cell<u32>,
+}
+
 /// Callback polled during search; returning true stops the search.
 pub type TerminateFn = Box<dyn Fn() -> bool + Send>;
 /// Callback receiving learned clauses (DIMACS literals).
@@ -28,21 +42,21 @@ impl Solver {
     pub fn assume(&mut self, d: i32) {
         let e = Lit::from_dimacs(d);
         self.prepare_external(e.vidx());
-        self.assumptions.push(e);
+        self.incremental.assumptions.push(e);
     }
 
     /// Whether the assumption `d` was used to derive unsatisfiability in the
     /// last `solve` call.
     pub fn failed(&self, d: i32) -> bool {
         let e = Lit::from_dimacs(d);
-        self.failed_assumptions.contains(&e)
+        self.incremental.failed.contains(&e)
     }
 
     /// Value of a literal in the model of the last satisfiable `solve` call:
     /// `d` if true, `-d` if false, `0` if unknown.
     pub fn val(&self, d: i32) -> i32 {
         let v = d.unsigned_abs() as usize - 1;
-        match self.last_model.get(v) {
+        match self.incremental.model.get(v) {
             Some(&m) if (m > 0) == (d > 0) => d,
             Some(_) => -d,
             None => 0,
@@ -62,8 +76,8 @@ impl Solver {
     }
 
     fn is_eliminated_external(&self, e: usize) -> bool {
-        match self.e2i[e] {
-            Lit::INVALID => self.ext_fixed[e] == 0,
+        match self.ext.e2i[e] {
+            Lit::INVALID => self.ext.fixed[e] == 0,
             i => self.flags[i.vidx()].has(ELIMINATED),
         }
     }
@@ -78,7 +92,7 @@ impl Solver {
             e + 1
         );
         // Split the extension stack into groups [witness, literals...].
-        let ext = std::mem::take(&mut self.extension);
+        let ext = std::mem::take(&mut self.ext.extension);
         let mut groups: Vec<(usize, usize)> = Vec::new();
         let mut start = 0;
         for k in 1..=ext.len() {
@@ -87,7 +101,7 @@ impl Solver {
                 start = k;
             }
         }
-        let mut reactivated = vec![false; self.evars];
+        let mut reactivated = vec![false; self.ext.vars];
         let mut restored = vec![false; groups.len()];
         let mut work = vec![e];
         reactivated[e] = true;
@@ -123,7 +137,7 @@ impl Solver {
                 kept.extend_from_slice(&ext[s..t]);
             }
         }
-        self.extension = kept;
+        self.ext.extension = kept;
         for (y, &r) in reactivated.iter().enumerate() {
             if r {
                 self.activate_external(y);
@@ -136,13 +150,13 @@ impl Solver {
     }
 
     fn activate_external(&mut self, e: usize) {
-        match self.e2i[e] {
+        match self.ext.e2i[e] {
             Lit::INVALID => {
                 // Compacted away: allocate a new internal variable.
                 let v = self.vars;
                 self.grow_internal(v + 1);
-                self.e2i[e] = Lit::new(v as Var, false);
-                self.i2e.push(e as u32);
+                self.ext.e2i[e] = Lit::new(v as Var, false);
+                self.ext.i2e.push(e as u32);
                 if let Some(p) = self.proof.as_mut() {
                     p.map.push(e as u32);
                 }
@@ -167,21 +181,21 @@ impl Solver {
 
     /// Map the external assumptions and freeze their variables.
     pub(crate) fn start_assumptions(&mut self) {
-        self.failed_assumptions.clear();
-        for k in 0..self.assumptions.len() {
-            if let Some(l) = self.internal(self.assumptions[k]) {
+        self.incremental.failed.clear();
+        for k in 0..self.incremental.assumptions.len() {
+            if let Some(l) = self.internal(self.incremental.assumptions[k]) {
                 self.flags[l.vidx()].insert(FROZEN);
             }
         }
     }
 
     pub(crate) fn end_assumptions(&mut self) {
-        for k in 0..self.assumptions.len() {
-            if let Some(l) = self.internal(self.assumptions[k]) {
+        for k in 0..self.incremental.assumptions.len() {
+            if let Some(l) = self.internal(self.incremental.assumptions[k]) {
                 self.flags[l.vidx()].remove(FROZEN);
             }
         }
-        self.assumptions.clear();
+        self.incremental.assumptions.clear();
     }
 
     /// Decide the next assumption if not all of them are decided.  Returns
@@ -190,20 +204,20 @@ impl Solver {
     /// `None` if all assumptions are decided.
     pub(crate) fn decide_assumption(&mut self) -> Option<bool> {
         let level = self.level as usize;
-        if level >= self.assumptions.len() {
+        if level >= self.incremental.assumptions.len() {
             return None;
         }
-        let e = self.assumptions[level];
+        let e = self.incremental.assumptions[level];
         let lit = match self.internal(e) {
             Some(l) => l,
             None => {
                 // Fixed at the root and compacted away.
-                let v = self.ext_fixed[e.vidx()];
+                let v = self.ext.fixed[e.vidx()];
                 if (v > 0) != e.negated() {
                     self.pseudo_decision(Lit::INVALID);
                     return Some(true);
                 }
-                self.failed_assumptions = vec![e];
+                self.incremental.failed = vec![e];
                 return Some(false);
             }
         };
@@ -270,41 +284,41 @@ impl Solver {
         }
         failed.sort_unstable();
         failed.dedup();
-        self.failed_assumptions = failed;
+        self.incremental.failed = failed;
     }
 
     /// Set a callback polled during search (about every 64 checks);
     /// returning true stops the search with `SolveResult::Unknown`.
     pub fn set_terminate(&mut self, callback: Option<TerminateFn>) {
-        self.terminate_cb = callback;
+        self.incremental.terminate = callback;
     }
 
     /// Set a callback receiving every learned clause with at most
     /// `max_length` literals.
     pub fn set_learn(&mut self, max_length: usize, callback: Option<LearnFn>) {
-        self.learn_cb = callback.map(|f| (max_length, f));
+        self.incremental.learn = callback.map(|f| (max_length, f));
     }
 
     /// Call the termination callback (throttled).
     pub(crate) fn terminate_callback(&self) -> bool {
-        let Some(cb) = &self.terminate_cb else {
+        let Some(cb) = &self.incremental.terminate else {
             return false;
         };
-        let n = self.terminate_calls.get().wrapping_add(1);
-        self.terminate_calls.set(n);
+        let n = self.incremental.terminate_calls.get().wrapping_add(1);
+        self.incremental.terminate_calls.set(n);
         n % 64 == 1 && cb()
     }
 
     /// Report the learned clause `lits` to the learn callback.
     pub(crate) fn learn_callback(&mut self, lits: &[Lit]) {
-        let Some((max_length, _)) = self.learn_cb else {
+        let Some((max_length, _)) = self.incremental.learn else {
             return;
         };
         if lits.len() > max_length {
             return;
         }
         let clause: Vec<i32> = lits.iter().map(|&l| self.external(l).to_dimacs()).collect();
-        if let Some((_, f)) = self.learn_cb.as_mut() {
+        if let Some((_, f)) = self.incremental.learn.as_mut() {
             f(&clause);
         }
     }

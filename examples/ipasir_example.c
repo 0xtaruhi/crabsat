@@ -3,6 +3,8 @@
  *   cargo build --release -p crabsat-ipasir
  *   cc -Iinclude examples/ipasir_example.c \
  *      target/release/libcrabsat_ipasir.a -lpthread -ldl -lm -o example
+ *
+ * (Linux; see include/ipasir.h for other platforms.)
  */
 #include <stdio.h>
 

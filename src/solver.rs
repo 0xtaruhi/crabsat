@@ -94,6 +94,34 @@ pub struct Delay {
     pub current: u32,
 }
 
+/// Delays of simplifications which were not productive recently.
+#[derive(Default)]
+pub struct Delays {
+    pub bumpreasons: Delay,
+    pub congruence: Delay,
+    pub sweep: Delay,
+    pub vivifyirr: Delay,
+}
+
+/// External (user) variables, their mapping to internal variables (which
+/// may be renumbered by compaction) and the extension stack.
+#[derive(Default)]
+pub struct External {
+    /// Number of external variables (original plus fresh ones).
+    pub vars: usize,
+    /// External variable -> internal (positive) literal, or `INVALID` if the
+    /// variable was removed by compaction.
+    pub e2i: Vec<Lit>,
+    /// Internal variable -> external variable.
+    pub i2e: Vec<u32>,
+    /// Values of external variables fixed at the root and compacted away.
+    pub fixed: Vec<i8>,
+    /// Extension stack for model reconstruction: groups of a witness
+    /// literal (tagged with `WITNESS`) followed by the clause literals
+    /// (external literals).
+    pub extension: Vec<u32>,
+}
+
 impl Delay {
     pub(crate) fn delaying(&mut self) -> bool {
         if self.count > 0 {
@@ -145,9 +173,6 @@ pub struct Solver {
     /// Per variable: bit 0/1 = positive/negative literal is a factor
     /// candidate (was added in a new irredundant clause).
     pub(crate) factor_flags: Vec<u8>,
-    /// Extension stack for model reconstruction: groups of a witness
-    /// literal (tagged with `WITNESS`) followed by the clause literals.
-    pub(crate) extension: Vec<u32>,
     pub(crate) eliminated: u32,
     pub(crate) elimination_bound: u32,
     pub(crate) dense: bool,
@@ -177,60 +202,27 @@ pub struct Solver {
     pub(crate) reluctant: Reluctant,
     pub(crate) tier1: [u32; 2],
     pub(crate) tier2: [u32; 2],
-    pub(crate) delay_bumpreasons: Delay,
-    pub(crate) delay_congruence: Delay,
-    pub(crate) delay_sweep: Delay,
-    pub(crate) delay_vivifyirr: Delay,
     pub(crate) mode_ticks: u64,
     pub(crate) mode_start: f64,
 
-    // Analysis scratch space.
-    pub(crate) clause: Vec<Lit>,
-    pub(crate) levels: Vec<u32>,
-    pub(crate) analyzed: Vec<Var>,
-    pub(crate) removable: Vec<Var>,
-    pub(crate) poisoned: Vec<Var>,
-    pub(crate) shrinkable: Vec<Var>,
-    pub(crate) minimize_stack: Vec<Var>,
-    pub(crate) promote_levels: Vec<u32>,
     pub(crate) marks: Vec<i8>,
-    pub(crate) antecedent_size: u32,
-    pub(crate) resolvent_size: u32,
+
+    pub(crate) analysis: crate::analyze::Analysis,
+    pub(crate) delays: Delays,
+    pub(crate) sharing: crate::share::Sharing,
+    pub(crate) incremental: crate::incremental::Incremental,
+    pub(crate) ext: External,
 
     pub(crate) limits: Limits,
     pub(crate) stats: Stats,
     pub(crate) proof: Option<Proof>,
     pub(crate) start_time: std::time::Instant,
     pub(crate) terminate: Option<Arc<AtomicBool>>,
-    pub(crate) shared: Option<Arc<crate::share::Shared>>,
-    pub(crate) exported: usize,
-    pub(crate) imported: usize,
-    pub(crate) share_id: u32,
-    pub(crate) export_buffer: Vec<crate::share::SharedClause>,
-    pub(crate) imported_clauses: usize,
-    pub(crate) last_share: u64,
     /// Preprocessing (and the lucky phases) already ran.
     pub(crate) presolved: bool,
-    /// Assumptions (external literals) for the next solve call.
-    pub(crate) assumptions: Vec<Lit>,
-    pub(crate) failed_assumptions: Vec<Lit>,
-    /// Model of the last satisfiable call in incremental mode.
-    pub(crate) last_model: Vec<i32>,
-    pub(crate) terminate_cb: Option<crate::incremental::TerminateFn>,
-    pub(crate) learn_cb: Option<(usize, crate::incremental::LearnFn)>,
-    pub(crate) terminate_calls: std::cell::Cell<u32>,
     /// Variables in order of their first occurrence in added clauses.
     pub(crate) first_seen: Vec<Var>,
     pub(crate) seen: Vec<bool>,
-    /// Number of external variables (original plus fresh ones).
-    pub(crate) evars: usize,
-    /// External variable -> internal (positive) literal, or `INVALID` if the
-    /// variable was removed by compaction.
-    pub(crate) e2i: Vec<Lit>,
-    /// Internal variable -> external variable.
-    pub(crate) i2e: Vec<u32>,
-    /// Values of external variables fixed at the root and compacted away.
-    pub(crate) ext_fixed: Vec<i8>,
 }
 
 impl Solver {
@@ -256,7 +248,6 @@ impl Solver {
             fixed_at_last_collect: 0,
             flags: Vec::new(),
             factor_flags: Vec::new(),
-            extension: Vec::new(),
             eliminated: 0,
             elimination_bound: 0,
             dense: false,
@@ -280,48 +271,22 @@ impl Solver {
             reluctant: Reluctant::default(),
             tier1: [0; 2],
             tier2: [0; 2],
-            delay_bumpreasons: Delay::default(),
-            delay_congruence: Delay::default(),
-            delay_sweep: Delay::default(),
-            delay_vivifyirr: Delay::default(),
             mode_ticks: 0,
             mode_start: 0.0,
-            clause: Vec::new(),
-            levels: Vec::new(),
-            analyzed: Vec::new(),
-            removable: Vec::new(),
-            poisoned: Vec::new(),
-            shrinkable: Vec::new(),
-            minimize_stack: Vec::new(),
-            promote_levels: Vec::new(),
             marks: Vec::new(),
-            antecedent_size: 0,
-            resolvent_size: 0,
+            analysis: Default::default(),
+            delays: Delays::default(),
+            sharing: Default::default(),
+            incremental: Default::default(),
+            ext: External::default(),
             limits: Limits::default(),
             stats: Stats::default(),
             proof: None,
             start_time: std::time::Instant::now(),
             terminate: None,
-            shared: None,
-            exported: 0,
-            imported: 0,
-            share_id: 0,
-            export_buffer: Vec::new(),
-            imported_clauses: 0,
-            last_share: 0,
             presolved: false,
-            assumptions: Vec::new(),
-            failed_assumptions: Vec::new(),
-            last_model: Vec::new(),
-            terminate_cb: None,
-            learn_cb: None,
-            terminate_calls: std::cell::Cell::new(0),
             first_seen: Vec::new(),
             seen: Vec::new(),
-            evars: 0,
-            e2i: Vec::new(),
-            i2e: Vec::new(),
-            ext_fixed: Vec::new(),
         };
         s.last_learned = vec![INVALID_REF; s.opts.eagersubsume as usize];
         s.random = s.opts.seed;
@@ -329,25 +294,25 @@ impl Solver {
     }
 
     pub fn set_proof(&mut self, mut proof: Proof) {
-        proof.map = self.i2e.clone();
+        proof.map = self.ext.i2e.clone();
         self.proof = Some(proof);
     }
 
     /// Make sure external variables `0..evars` exist.
     pub fn reserve_vars(&mut self, evars: usize) {
-        if evars <= self.evars {
+        if evars <= self.ext.vars {
             return;
         }
-        let new = evars - self.evars;
+        let new = evars - self.ext.vars;
         let first = self.vars;
         self.grow_internal(first + new);
         for k in 0..new {
             let i = (first + k) as u32;
-            let e = self.evars as u32;
-            self.evars += 1;
-            self.e2i.push(Lit::new(i, false));
-            self.i2e.push(e);
-            self.ext_fixed.push(0);
+            let e = self.ext.vars as u32;
+            self.ext.vars += 1;
+            self.ext.e2i.push(Lit::new(i, false));
+            self.ext.i2e.push(e);
+            self.ext.fixed.push(0);
             if let Some(p) = self.proof.as_mut() {
                 p.map.push(e);
             }
@@ -357,21 +322,21 @@ impl Solver {
     /// A fresh variable (internal and external), e.g. for factorization.
     pub(crate) fn new_var(&mut self) -> Var {
         let v = self.vars as Var;
-        self.reserve_vars(self.evars + 1);
+        self.reserve_vars(self.ext.vars + 1);
         v
     }
 
     /// The external literal of an internal literal.
     #[inline]
     pub(crate) fn external(&self, lit: Lit) -> Lit {
-        Lit::new(self.i2e[lit.vidx()], lit.negated())
+        Lit::new(self.ext.i2e[lit.vidx()], lit.negated())
     }
 
     /// The internal literal of an external literal, if the variable was not
     /// compacted away.
     #[inline]
     pub(crate) fn internal(&self, lit: Lit) -> Option<Lit> {
-        let i = *self.e2i.get(lit.vidx())?;
+        let i = *self.ext.e2i.get(lit.vidx())?;
         (i != Lit::INVALID).then(|| if lit.negated() { !i } else { i })
     }
 
@@ -651,7 +616,7 @@ impl Solver {
                 Some(l) => lits.push(l),
                 None => {
                     // Fixed at the root and compacted away.
-                    let v = self.ext_fixed[e.vidx()];
+                    let v = self.ext.fixed[e.vidx()];
                     assert!(v != 0, "clauses on eliminated variables are not supported");
                     if (v > 0) != e.negated() {
                         return; // satisfied
@@ -729,8 +694,8 @@ impl Solver {
     /// The satisfying assignment in DIMACS form (1-based, signed), with
     /// eliminated variables reconstructed from the extension stack.
     pub fn model(&self) -> Vec<i32> {
-        let mut value: Vec<bool> = (0..self.evars).map(|e| self.external_value(e)).collect();
-        let ext = &self.extension;
+        let mut value: Vec<bool> = (0..self.ext.vars).map(|e| self.external_value(e)).collect();
+        let ext = &self.ext.extension;
         let mut end = ext.len();
         while end > 0 {
             // The group starts at the witness (the last tagged entry).
@@ -757,8 +722,8 @@ impl Solver {
 
     /// Current value of an external variable (before reconstruction).
     fn external_value(&self, e: usize) -> bool {
-        match self.e2i[e] {
-            Lit::INVALID => self.ext_fixed[e] > 0,
+        match self.ext.e2i[e] {
+            Lit::INVALID => self.ext.fixed[e] > 0,
             i => self.values[i.idx()] > 0,
         }
     }
@@ -766,10 +731,10 @@ impl Solver {
     /// Push a clause with witness literal `witness` (which must be in the
     /// clause) onto the extension stack.
     pub(crate) fn push_extension(&mut self, witness: Lit, lits: &[Lit]) {
-        self.extension.push(self.external(witness).0 | WITNESS);
+        self.ext.extension.push(self.external(witness).0 | WITNESS);
         for &l in lits {
             if l != witness {
-                self.extension.push(self.external(l).0);
+                self.ext.extension.push(self.external(l).0);
             }
         }
     }
@@ -781,10 +746,10 @@ impl Solver {
         self.start_assumptions();
         let res = self.search();
         if res == SolveResult::Sat && self.opts.incremental {
-            self.last_model = self.model();
+            self.incremental.model = self.model();
         }
         if res != SolveResult::Unsat || self.inconsistent {
-            self.failed_assumptions.clear();
+            self.incremental.failed.clear();
         }
         self.end_assumptions();
         self.flush_pending_units();
@@ -821,7 +786,7 @@ impl Solver {
     /// Number of variables (external, including fresh ones introduced by
     /// the solver).
     pub fn num_vars(&self) -> usize {
-        self.evars
+        self.ext.vars
     }
 
     /// Seconds since the solver was created.

@@ -64,7 +64,7 @@ impl Solver {
     /// `self`.  The conflict limit and the termination flag of `self` apply
     /// to all members.
     pub fn solve_portfolio(&mut self, clauses: &[Vec<i32>], threads: usize) -> PortfolioResult {
-        let vars = self.evars;
+        let vars = self.ext.vars;
         let flag = self
             .terminate
             .get_or_insert_with(|| Arc::new(AtomicBool::new(false)))
@@ -96,7 +96,7 @@ impl Solver {
             };
             (res, model)
         };
-        self.shared = Some(shared.clone());
+        self.sharing.pool = Some(shared.clone());
         // Every member preprocesses with its own options: this is done in
         // parallel and diversifies the simplified formulas (cloning a single
         // preprocessed solver was measured to be worse).
@@ -107,13 +107,13 @@ impl Solver {
                 let (finish, solve, base) = (&finish, &solve, &base);
                 scope.spawn(move || {
                     let mut s = Solver::new(diversify(base, i));
-                    s.share_id = i as u32;
+                    s.sharing.id = i as u32;
                     s.reserve_vars(vars);
                     for c in clauses {
                         s.add_clause(c);
                     }
                     s.terminate = Some(flag);
-                    s.shared = Some(shared);
+                    s.sharing.pool = Some(shared);
                     s.limits.conflicts = conflicts;
                     let (res, model) = solve(&mut s);
                     finish(res, model, i);
@@ -126,7 +126,7 @@ impl Solver {
                 flag.store(true, Ordering::Relaxed);
             }
         });
-        self.shared = None;
+        self.sharing.pool = None;
         result.into_inner().unwrap().unwrap_or(PortfolioResult {
             result: SolveResult::Unknown,
             model: Vec::new(),

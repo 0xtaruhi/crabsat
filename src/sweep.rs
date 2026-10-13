@@ -30,7 +30,7 @@ impl Solver {
         if !self.opts.sweep || self.inconsistent {
             return !self.inconsistent;
         }
-        if self.delay_sweep.delaying() {
+        if self.delays.sweep.delaying() {
             return true;
         }
         self.stats.sweeps += 1;
@@ -105,9 +105,9 @@ impl Solver {
         if self.stats.sweep_units == before_units
             && self.stats.sweep_equivalences == before_equivalences
         {
-            self.delay_sweep.bump();
+            self.delays.sweep.bump();
         } else {
-            self.delay_sweep.reduce();
+            self.delays.sweep.reduce();
         }
         if self.inconsistent {
             return false;
