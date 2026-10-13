@@ -288,7 +288,10 @@ fn debug_model(s: &Solver, clauses: &[Vec<i32>], model: &[i32], id: usize) {
         let target: Vec<crabsat::Lit> = c.iter().map(|&d| crabsat::Lit::from_dimacs(d)).collect();
         s.debug_reconstruct(&target);
         for &d in c {
-            let lit = crabsat::Lit::from_dimacs(d);
+            let Some(lit) = s.internal(crabsat::Lit::from_dimacs(d)) else {
+                eprintln!("  {d}: compacted away");
+                continue;
+            };
             let a = s.assigned[lit.vidx()];
             eprintln!(
                 "  {d}: value {} level {} flags {} in-extension-as-witness {}",

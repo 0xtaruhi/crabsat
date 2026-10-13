@@ -3,6 +3,7 @@
 pub mod analyze;
 pub mod arena;
 pub mod backtrack;
+pub mod compact;
 pub mod congruence;
 pub mod dimacs;
 pub mod ema;

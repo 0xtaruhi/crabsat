@@ -30,8 +30,9 @@ impl Solver {
         let Some(shared) = self.shared.clone() else { return true };
         debug_assert_eq!(self.level, 0);
         let mut units = shared.units.lock().unwrap();
+        // Units are exchanged as external literals.
         while self.exported < self.trail.len() {
-            let lit = self.trail[self.exported];
+            let lit = self.external(self.trail[self.exported]);
             self.exported += 1;
             if lit.vidx() < shared.vars {
                 units.push(lit);
@@ -42,7 +43,11 @@ impl Solver {
         drop(units);
         self.replay_or_log(&new);
         let mut assigned = false;
-        for lit in new {
+        for ext in new {
+            let Some(lit) = self.internal(ext) else {
+                // Fixed and compacted away (consistent by construction).
+                continue;
+            };
             if self.flags[lit.vidx()] & ELIMINATED != 0 {
                 continue;
             }
@@ -111,7 +116,8 @@ impl Solver {
             units.extend(entries.remove(0).2);
         }
         let mut assigned = false;
-        for lit in units {
+        for ext in units {
+            let Some(lit) = self.internal(ext) else { continue };
             if self.flags[lit.vidx()] & ELIMINATED != 0 {
                 continue;
             }

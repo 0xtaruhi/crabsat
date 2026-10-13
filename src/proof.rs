@@ -8,11 +8,27 @@ pub struct Proof {
     binary: bool,
     pub added: u64,
     pub deleted: u64,
+    /// Internal variable -> external variable.
+    pub map: Vec<u32>,
 }
 
 impl Proof {
     pub fn new(out: Box<dyn Write>, binary: bool) -> Proof {
-        Proof { out: BufWriter::with_capacity(1 << 20, out), binary, added: 0, deleted: 0 }
+        Proof {
+            out: BufWriter::with_capacity(1 << 20, out),
+            binary,
+            added: 0,
+            deleted: 0,
+            map: Vec::new(),
+        }
+    }
+
+    #[inline]
+    fn external(&self, l: Lit) -> Lit {
+        match self.map.get(l.vidx()) {
+            Some(&e) => Lit::new(e, l.negated()),
+            None => l,
+        }
     }
 
     fn line(&mut self, tag: u8, lits: &[Lit]) -> io::Result<()> {
@@ -20,6 +36,7 @@ impl Proof {
             let mut buf = [0u8; 5];
             self.out.write_all(&[tag])?;
             for &l in lits {
+                let l = self.external(l);
                 // Binary DRAT maps DIMACS literal l to 2*|l| + (l < 0).
                 let mut x = 2 * (l.var() + 1) + l.negated() as u32;
                 let mut n = 0;
@@ -37,6 +54,7 @@ impl Proof {
                 self.out.write_all(b"d ")?;
             }
             for &l in lits {
+                let l = self.external(l);
                 write!(self.out, "{} ", l.to_dimacs())?;
             }
             self.out.write_all(b"0\n")

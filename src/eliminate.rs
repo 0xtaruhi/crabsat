@@ -74,6 +74,9 @@ impl Solver {
         self.limits.eliminate_conflicts = self.stats.conflicts + self.scale_delta(delta as u64);
         self.last_eliminate_ticks = self.stats.search_ticks;
         self.recount_phase_heights();
+        if self.compacting() && !self.compact() {
+            return false;
+        }
         if self.verbose(2) {
             println!(
                 "c [eliminate-{}] eliminated {} variables (total {})",

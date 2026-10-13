@@ -472,8 +472,7 @@ impl Solver {
                 cur.matches = (0..cur.clauses.len()).collect();
             }
         }
-        let fresh_var = self.vars as Var;
-        self.reserve_vars(self.vars + 1);
+        let fresh_var = self.new_var();
         f.fresh.push(fresh_var);
         let fresh = Lit::new(fresh_var, false);
         f.count.resize(2 * self.vars, 0);

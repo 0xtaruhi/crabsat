@@ -46,6 +46,9 @@ impl Solver {
         self.limits.probe_conflicts = self.stats.conflicts + self.scale_delta(delta as u64);
         self.last_probe_ticks = self.stats.search_ticks;
         self.recount_phase_heights();
+        if self.compacting() && !self.compact() {
+            return false;
+        }
         self.report('p');
         !self.inconsistent
     }

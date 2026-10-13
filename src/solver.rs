@@ -220,6 +220,15 @@ pub struct Solver {
     pub first_seen: Vec<Var>,
     pub seen: Vec<bool>,
     pub activated: u64,
+    /// Number of external variables (original plus fresh ones).
+    pub evars: usize,
+    /// External variable -> internal (positive) literal, or `INVALID` if the
+    /// variable was removed by compaction.
+    pub e2i: Vec<Lit>,
+    /// Internal variable -> external variable.
+    pub i2e: Vec<u32>,
+    /// Values of external variables fixed at the root and compacted away.
+    pub ext_fixed: Vec<i8>,
 }
 
 impl Solver {
@@ -299,18 +308,65 @@ impl Solver {
             first_seen: Vec::new(),
             seen: Vec::new(),
             activated: 0,
+            evars: 0,
+            e2i: Vec::new(),
+            i2e: Vec::new(),
+            ext_fixed: Vec::new(),
         };
         s.last_learned = vec![INVALID_REF; s.opts.eagersubsume as usize];
         s.random = s.opts.seed;
         s
     }
 
-    pub fn set_proof(&mut self, proof: Proof) {
+    pub fn set_proof(&mut self, mut proof: Proof) {
+        proof.map = self.i2e.clone();
         self.proof = Some(proof);
     }
 
-    /// Make sure variables `0..vars` exist.
-    pub fn reserve_vars(&mut self, vars: usize) {
+    /// Make sure external variables `0..evars` exist.
+    pub fn reserve_vars(&mut self, evars: usize) {
+        if evars <= self.evars {
+            return;
+        }
+        let new = evars - self.evars;
+        let first = self.vars;
+        self.grow_internal(first + new);
+        for k in 0..new {
+            let i = (first + k) as u32;
+            let e = self.evars as u32;
+            self.evars += 1;
+            self.e2i.push(Lit::new(i, false));
+            self.i2e.push(e);
+            self.ext_fixed.push(0);
+            if let Some(p) = self.proof.as_mut() {
+                p.map.push(e);
+            }
+        }
+    }
+
+    /// A fresh variable (internal and external), e.g. for factorization.
+    pub fn new_var(&mut self) -> Var {
+        let v = self.vars as Var;
+        self.reserve_vars(self.evars + 1);
+        v
+    }
+
+    /// The external literal of an internal literal.
+    #[inline]
+    pub fn external(&self, lit: Lit) -> Lit {
+        Lit::new(self.i2e[lit.vidx()], lit.negated())
+    }
+
+    /// The internal literal of an external literal, if the variable was not
+    /// compacted away.
+    #[inline]
+    pub fn internal(&self, lit: Lit) -> Option<Lit> {
+        let i = *self.e2i.get(lit.vidx())?;
+        (i != Lit::INVALID).then(|| if lit.negated() { !i } else { i })
+    }
+
+    /// Make sure internal variables `0..vars` exist.
+    fn grow_internal(&mut self, vars: usize) {
         if vars <= self.vars {
             return;
         }
@@ -573,8 +629,8 @@ impl Solver {
             })
         });
         let Some(target) = target else { return };
-        if lits.iter().all(|l| target.contains(&l.to_dimacs())) {
-            let d: Vec<i32> = lits.iter().map(|l| l.to_dimacs()).collect();
+        if lits.iter().all(|l| target.contains(&self.external(*l).to_dimacs())) {
+            let d: Vec<i32> = lits.iter().map(|l| self.external(*l).to_dimacs()).collect();
             eprintln!(
                 "TRACE {event} {d:?} conflicts {} dense {} probing {} level {}",
                 self.stats.conflicts, self.dense, self.probing, self.level
@@ -603,7 +659,22 @@ impl Solver {
 
     /// Add an original clause given as DIMACS literals.
     pub fn add_clause_dimacs(&mut self, dimacs: &[i32]) {
-        let lits: Vec<Lit> = dimacs.iter().map(|&d| Lit::from_dimacs(d)).collect();
+        let mut lits: Vec<Lit> = Vec::with_capacity(dimacs.len());
+        for &d in dimacs {
+            let e = Lit::from_dimacs(d);
+            self.reserve_vars(e.vidx() + 1);
+            match self.internal(e) {
+                Some(l) => lits.push(l),
+                None => {
+                    // Fixed at the root and compacted away.
+                    let v = self.ext_fixed[e.vidx()];
+                    assert!(v != 0, "clauses on eliminated variables are not supported");
+                    if (v > 0) != e.negated() {
+                        return; // satisfied
+                    }
+                }
+            }
+        }
         self.add_clause(&lits);
     }
 
@@ -611,7 +682,7 @@ impl Solver {
     pub fn add_clause(&mut self, lits: &[Lit]) {
         assert_eq!(self.level, 0, "clauses can only be added at the root level");
         if let Some(max) = lits.iter().map(|l| l.vidx()).max() {
-            self.reserve_vars(max + 1);
+            assert!(max < self.vars, "unknown internal variable");
         }
         if self.seen.len() < self.vars {
             self.seen.resize(self.vars, false);
@@ -674,8 +745,7 @@ impl Solver {
     /// The satisfying assignment in DIMACS form (1-based, signed), with
     /// eliminated variables reconstructed from the extension stack.
     pub fn model(&self) -> Vec<i32> {
-        let mut value: Vec<bool> =
-            (0..self.vars).map(|v| self.values[2 * v] > 0).collect();
+        let mut value: Vec<bool> = (0..self.evars).map(|e| self.external_value(e)).collect();
         let ext = &self.extension;
         let mut end = ext.len();
         while end > 0 {
@@ -699,6 +769,14 @@ impl Solver {
             .enumerate()
             .map(|(v, &b)| if b { v as i32 + 1 } else { -(v as i32 + 1) })
             .collect()
+    }
+
+    /// Current value of an external variable (before reconstruction).
+    fn external_value(&self, e: usize) -> bool {
+        match self.e2i[e] {
+            Lit::INVALID => self.ext_fixed[e] > 0,
+            i => self.values[i.idx()] > 0,
+        }
     }
 
     /// A clause of the current clause database falsified (or not
@@ -727,7 +805,7 @@ impl Solver {
     /// Debugging: replay model reconstruction and report the flips of
     /// variables of `target` together with the witness clauses.
     pub fn debug_reconstruct(&self, target: &[Lit]) {
-        let mut value: Vec<bool> = (0..self.vars).map(|v| self.values[2 * v] > 0).collect();
+        let mut value: Vec<bool> = (0..self.evars).map(|e| self.external_value(e)).collect();
         let ext = &self.extension;
         let mut end = ext.len();
         while end > 0 {
@@ -741,10 +819,7 @@ impl Solver {
                 let w = clause[0];
                 value[w.vidx()] = !w.negated();
                 if target.iter().any(|t| t.var() == w.var()) {
-                    let d: Vec<String> = clause
-                        .iter()
-                        .map(|l| format!("{}{}", l, if self.flags[l.vidx()] & ELIMINATED != 0 { "E" } else { "" }))
-                        .collect();
+                    let d: Vec<String> = clause.iter().map(|l| format!("{l}")).collect();
                     let tsat = target.iter().any(|l| value[l.vidx()] != l.negated());
                     eprintln!("FLIP {} by {:?} at {} -> target satisfied {}", w, d, start, tsat);
                 }
@@ -757,10 +832,10 @@ impl Solver {
     /// clause) onto the extension stack.
     pub fn push_extension(&mut self, witness: Lit, lits: &[Lit]) {
         self.trace(&format!("extension(witness {witness})"), lits);
-        self.extension.push(witness.0 | WITNESS);
+        self.extension.push(self.external(witness).0 | WITNESS);
         for &l in lits {
             if l != witness {
-                self.extension.push(l.0);
+                self.extension.push(self.external(l).0);
             }
         }
     }
