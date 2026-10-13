@@ -1,178 +1,219 @@
-# crabsat ロードマップ
+# crabsat roadmap
 
-kissat (v4.0.4, MIT) の設計を参照した、Rust 製の高性能 CDCL SAT ソルバ。
+A high-performance CDCL SAT solver in Rust following the design of Kissat
+(v4.0.4, MIT).
 
-## 設計原則
+## Design principles
 
-1. **メモリレイアウト優先** — 節アリーナ (u32 オフセット参照)、2リテラル節は watch のみ、
-   リテラル添字の値配列、詰めた watch 表現。後から変えにくい部分を最初に固める。
-2. **常に検証可能** — すべてのフェーズで DRAT 証明を出力し、SAT はモデル検証、UNSAT は
-   drat-trim で検証する。kissat を差分テストのオラクルとして使う。
-3. **ticks による予算管理** — 探索中にキャッシュライン単位のアクセス量 (ticks) を数え、
-   モード切替や inprocessing の予算をそれに比例させる。
-4. **unsafe は局所化** — 境界チェック除去は propagate / analyze / arena に限定し、
-   `debug_assert!` で常に守る。
+1. **Memory layout first** — clause arena with u32 offset references, binary
+   clauses only in watch lists, literal-indexed value arrays, compact watches.
+   The parts that are hard to change later are fixed first.
+2. **Always verifiable** — DRAT proofs in every phase; models are checked and
+   UNSAT proofs are verified with drat-trim.  Kissat serves as the oracle for
+   differential testing.
+3. **Budgets in ticks** — the search counts memory accesses in cache lines
+   (ticks); mode switching and inprocessing budgets are proportional to them.
+4. **Local unsafe** — bounds check elimination only in propagation, analysis
+   and the arena, always guarded by `debug_assert!`.
 
-## マイルストーン
+## Milestones
 
-各マイルストーンの完了条件 (DoD) を満たしたら次へ進む。
+Each milestone moves on once its definition of done (DoD) is met.
 
-### M0: 基盤
+### M0: Foundation
 
-- [x] Cargo プロジェクト、release プロファイル (lto=fat, codegen-units=1, panic=abort)
-- [x] 型: `Lit`, `Var`, `CRef`、`Value` (i8)
-- [x] DIMACS パーサ (xz/gz/bz2 は外部ツールで展開)
-- [x] SAT competition 形式の出力 (`s SATISFIABLE` / `v ...` / exit code 10/20)
-- [x] DRAT 証明出力 (テキスト / バイナリ)
-- [x] テスト基盤 (`scripts/fuzz.py`, `tests/basic.rs`): ランダム CNF 生成、モデル検証、drat-trim 連携、kissat 差分テスト
+- [x] Cargo project, release profile (lto=fat, codegen-units=1, panic=abort)
+- [x] Types: `Lit`, `Var`, `CRef`, `Value` (i8)
+- [x] DIMACS parser (xz/gz/bz2 decompressed with external tools)
+- [x] SAT competition output (`s SATISFIABLE` / `v ...` / exit codes 10/20)
+- [x] DRAT proof output (text / binary)
+- [x] Test infrastructure (`scripts/fuzz.py`, `tests/basic.rs`): random CNF
+  generation, model checking, drat-trim integration, differential testing
+  against Kissat
 
-### M1: CDCL コア (MiniSat 相当)
+### M1: CDCL core (MiniSat level)
 
-- [x] 節アリーナ: ヘッダ (glue, used, flags, searched, size) + リテラル
-- [x] 2リテラル節は watch のみ (virtual binary)
-- [x] watch: Kissat と同じ 32bit 可変長形式 (binary 1語 / large 2語)
-- [x] 伝播: kissat 方式 (`lits[0]^lits[1]^not_lit`、searched 位置、delayed watches)
-- [x] 1UIP 解析、再帰的 minimization (poison/removable)
-- [x] VSIDS (二分ヒープ, f64 スコア, rescale)
-- [x] 学習節削減 (glue + used)
-- [x] restart (glue EMA)、phase saving
-- **DoD**: ランダム 3-SAT / fuzz 1万件で kissat と結果一致、UNSAT 証明が全て検証可能
+- [x] Clause arena: header (glue, used, flags, searched, size) + literals
+- [x] Binary clauses only in watch lists (virtual binaries)
+- [x] Watches: Kissat's 32-bit variable length format (binary 1 word / large
+  2 words)
+- [x] Propagation as in Kissat (`lits[0]^lits[1]^not_lit`, searched position,
+  delayed watches)
+- [x] 1UIP analysis, recursive minimization (poison/removable)
+- [x] VSIDS (binary heap, f64 scores, rescaling)
+- [x] Learned clause reduction (glue + used)
+- [x] Restarts (glue EMA), phase saving
+- **DoD**: agreement with Kissat on random 3-SAT and 10k fuzz cases, all UNSAT
+  proofs verified
 
-### M2: kissat 探索コア
+### M2: Kissat search core
 
-- [x] VMTF キュー (focused モード)、enqueue stamp、bump の stamp 順ソート
-- [x] stable/focused モード切替 (focused: 衝突数、stable: ticks、nlog⁴n 間隔)
-- [x] focused restart: fast/slow glue EMA (bias 補正付き) + margin
-- [x] stable restart: reluctant doubling (Luby)
-- [x] target / best phase、rephasing (best / original / inverted; walk は未実装で best に置換)
-- [x] chronological backtracking (chronolevels=100)
-- [x] shrinking (kissat の block 単位 all-UIP 短縮、shrink=3)
-- [x] reason-side bumping (decision rate 制限付き)
-- [x] tier1/tier2 動的計算と reduce (used カウンタ、reducehigh/low)
+- [x] VMTF queue (focused mode), enqueue stamps, bumping sorted by stamp
+- [x] Stable/focused mode switching (focused: conflicts, stable: ticks,
+  n log⁴ n intervals)
+- [x] Focused restarts: fast/slow glue EMA (bias corrected) with margin
+- [x] Stable restarts: reluctant doubling (Luby)
+- [x] Target / best phases, rephasing (best / walk / inverted / original)
+- [x] Chronological backtracking (chronolevels=100)
+- [x] Shrinking (Kissat's block-wise all-UIP shrinking, shrink=3)
+- [x] Reason-side bumping (limited by decision rate)
+- [x] Dynamic tier1/tier2 limits and reduction (used counters,
+  reducehigh/low)
 - [x] OTFS (on-the-fly strengthening)
-- [x] eager subsumption
-- [x] restart 時の trail 再利用
-- [x] 統計出力 (`c` 行)
-- **DoD**: SAT Competition 2023 のサブセットで inprocessing 無効の kissat
-  (`--simplify=false` 系) と同等程度の PAR-2
+- [x] Eager subsumption
+- [x] Trail reuse on restarts
+- [x] Statistics output (`c` lines)
+- **DoD**: PAR-2 comparable to Kissat without inprocessing
+  (`--simplify=false` etc.) on a SAT Competition 2023 subset
 
-### M3: 基本 inprocessing
+### M3: Basic inprocessing
 
-- [x] ticks ベースのスケジューラ (effort per mille, mineffort)
-- [x] ガベージコレクション (アリーナのコンパクション)
-- [ ] compact (変数の振り直し)
-- [x] probing: failed literal (2リテラル節の根から)
-- [x] substitute: 2リテラル節の SCC による等価リテラル置換
-- [ ] transitive reduction
-- [x] vivification (tier1/tier2/tier3/irredundant)
-- [x] subsumption / strengthening (forward, one-watch)
-- [x] BVE: bounded variable elimination + ゲート検出 (AND / 等価 / ITE、XOR は既定で無効)
-- [ ] 定義抽出 (kitten)
-- [x] モデル復元 (extension stack)
-- [x] transitive reduction
-- [ ] backbone
-- **DoD**: kissat デフォルトの 70〜80% 程度の解けた問題数
+- [x] Tick based scheduling (effort per mille, mineffort)
+- [x] Garbage collection (arena compaction)
+- [x] Compact (variable renumbering with external/internal maps)
+- [x] Probing: failed literals (roots of the binary implication graph)
+- [x] Substitute: equivalent literal substitution via SCCs of binary clauses
+- [x] Transitive reduction
+- [x] Vivification (tier1/tier2/tier3/irredundant)
+- [x] Subsumption / strengthening (forward, one-watch)
+- [x] BVE: bounded variable elimination with gate detection (AND / equivalence
+  / ITE; XOR disabled by default)
+- [x] Model reconstruction (extension stack)
+- [ ] Binary clause backbone
+- **DoD**: about 70–80% of the instances solved by default Kissat
 
-### M4: 高度な技法
+### M4: Advanced techniques
 
-- [x] walk (ProbSAT) による rephasing
-- [x] lucky phases、warmup
-- [x] kitten (小さな内部ソルバ) と SAT sweeping (backbone + 分割精緻化による同値検出)
-- [ ] kitten による定義抽出 (BVE)
-- [x] congruence closure (AND / ITE / XOR、RUP 証明付き)
-- [x] factor (bounded variable addition) — M3 で前倒し実装
-- [x] xz/gz 圧縮入力
+- [x] Rephasing with local search (ProbSAT walk)
+- [x] Lucky phases (before and after preprocessing), warmup
+- [x] Kitten (embedded mini solver) and SAT sweeping (backbone and
+  equivalences by partition refinement)
+- [ ] Definition extraction with kitten (BVE)
+- [x] Congruence closure (AND / ITE / XOR with RUP proofs, binary clause
+  extraction, units from binary clause pairs)
+- [x] Factor (bounded variable addition)
+- [x] xz/gz compressed input
+- [x] Decision reordering (reorder), random decision sequences (randec)
 
-- [x] decision reordering (reorder)、random decision sequences (randec)
+### M5: Beyond Kissat
 
-### M5: 差別化
+- [ ] IPASIR compatible incremental API (assumptions)
+- [x] Parallel portfolio (`--threads=N`, sharing of root-level units)
+- [x] Extended clause sharing (binary clauses, low glue learned clauses)
 
-- [ ] IPASIR 互換の増分 API (assumptions)
-- [x] 並列ポートフォリオ (`--threads=N`、root unit の共有)
-- [x] 節共有の拡張 (2リテラル節、低 glue 学習節)
+## Benchmarking
 
-## ベンチマーク方針
+- Instances: SAT Competition 2023 main track (364 instances below 20 MB
+  compressed).
+- `scripts/bench.py` runs a solver on a set of instances in parallel and
+  reports solved instances, PAR-2 and total time.
+- Current reference set ("union"): the 162 instances solved by crabsat or
+  Kissat within 120 s, run with a 60 s limit.  Solvers that are compared are
+  run **simultaneously under the same load**, since SAT results vary strongly
+  between runs and measurements taken at different times are not comparable.
 
-- SAT Competition 2023 main track から、kissat が 1〜60 秒で解ける問題をサブセットとして選ぶ。
-- `scripts/bench.sh` で crabsat と kissat を同条件 (タイムアウト付き) で実行し、
-  解けた数・PAR-2・合計時間を比較する。
+## Development log
 
-## 進捗ログ
+Initial benchmark: the 71 instances of the SAT Competition 2023 main track
+which Kissat 4.0.4 solves in 1–30 s (`medium`, 37 SAT / 34 UNSAT), 120 s time
+limit, 32 jobs in parallel.  PAR-2 counts unsolved instances as 240 s.
 
-ベンチマーク: SAT Competition 2023 main track のうち、Kissat 4.0.4 が 1〜30 秒で解く 71 問
-(`medium`、SAT 37 / UNSAT 34)。タイムアウト 120 秒、32 並列。PAR-2 は未解決を 240 秒として計算。
-
-| 版 | 解けた数 | UNSAT PAR-2 | SAT PAR-2 | 主な追加 |
+| version | solved | UNSAT PAR-2 | SAT PAR-2 | main additions |
 |---|---|---|---|---|
-| Kissat 4.0.4 (既定) | 71/71 | 258 | 385 | — |
+| Kissat 4.0.4 (default) | 71/71 | 258 | 385 | — |
 | Kissat (`--simplify=false --lucky=false --preprocess=false`) | 43/71 | 5011 | 2440 | — |
-| M1/M2 (inprocessing なし) | 40/71 | 5256 | 3188 | CDCL コア + Kissat 探索ヒューリスティクス |
-| + BVE / subsumption | 43/71 | 5085 | 2737 | 変数除去、ゲート (AND/等価) |
-| + probing | 46/71 | 4978 | 1910 | ELS 置換、failed literal、vivification |
+| M1/M2 (no inprocessing) | 40/71 | 5256 | 3188 | CDCL core + Kissat search heuristics |
+| + BVE / subsumption | 43/71 | 5085 | 2737 | variable elimination, gates (AND/equivalence) |
+| + probing | 46/71 | 4978 | 1910 | ELS substitution, failed literals, vivification |
 | + factor | 67/71 | 292 | 1919 | bounded variable addition |
-| + congruence / walk | 66/71 | 378 | 2018 | 合同閉包、ProbSAT |
+| + congruence / walk | 66/71 | 378 | 2018 | congruence closure, ProbSAT |
 | + lucky / reorder / randec | 70/71 | 314 | 1193 | |
-| + sweep / vivify 強化 / factor 修正 / warmup | 69/71 | 289 | ~1450 | SAT 側は試行間のばらつきが大きい |
+| + sweep / stronger vivify / factor fix / warmup | 69/71 | 289 | ~1450 | SAT results vary strongly between runs |
 
-全 364 問 (120 秒) では crabsat 138 問 / Kissat 137 問 (共通 117 問、SAT/UNSAT の不一致なし)。
+On all 364 instances (120 s): crabsat 138 / Kissat 137 solved (117 in common,
+no SAT/UNSAT disagreement).
 
-検証: 毎段階で `scripts/fuzz.py` (ランダム k-SAT、AMO 構造、miter 回路) を各種オプションで
-数千件実行し、Kissat との結果一致・`--check` によるモデル検証・drat-trim による証明検証を確認。
+Note: this `medium` set was later found to be biased towards Kissat, since it
+was selected from instances Kissat solved quickly with its default seed; with
+other seeds Kissat fails on some of them as well.
 
-### 2026-10-13: ポートフォリオで誤った SAT を返すバグの修正
+Verification: at every step `scripts/fuzz.py` (random k-SAT, at-most-one
+structures, miter circuits) was run on thousands of cases with various
+options, checking agreement with Kissat, models (`--check`) and DRAT proofs
+(drat-trim).
 
-OTFS で強化した理由節が衝突節を包含するとき、衝突節を削除していたが、衝突節が既約節で
-理由節が冗長節の場合に既約節が失われていた (Kissat は理由節を既約節に昇格させる)。
-その後の BVE の復元が失われた節に依存し、不正なモデルが生じた。単独実行でも起こり得るが、
-unit 共有で探索経路が変わると頻発した。取り込み unit の記録と再生 (`CRABSAT_IMPORT_LOG` /
-`CRABSAT_REPLAY`) と節の追跡 (`CRABSAT_TRACE`) で特定。
+### 2026-10-13: Fixed invalid SAT answers in the portfolio
 
-| 版 | 解けた数 | UNSAT PAR-2 | SAT PAR-2 |
+When a reason clause strengthened on the fly subsumed the conflict clause, the
+conflict clause was deleted; if the conflict was irredundant and the reason
+redundant, an irredundant clause was lost (Kissat promotes the reason to
+irredundant).  Later model reconstruction after variable elimination depended
+on the lost clause and produced invalid models.  The bug could also occur in
+single-threaded mode but became frequent when unit sharing changed the search
+path.  Found with import logging and replay (`CRABSAT_IMPORT_LOG` /
+`CRABSAT_REPLAY`) and clause tracing (`CRABSAT_TRACE`).
+
+| version | solved | UNSAT PAR-2 | SAT PAR-2 |
 |---|---|---|---|
-| 修正後 単独 | 65/71 | 407 | 2543 |
-| 修正後 8 スレッド | 70/71 | 338 | 958 |
+| after the fix, single thread | 65/71 | 407 | 2543 |
+| after the fix, 8 threads | 70/71 | 338 | 958 |
 
-(UNSAT 34 問で XOR ゲートを外すと PAR-2 391 → 297 のため、BVE の XOR ゲートは既定で無効化)
+(XOR gates in BVE are disabled by default since removing them improved the
+UNSAT PAR-2 on the 34 UNSAT instances from 391 to 297.)
 
-### 2026-10-13: Kissat と同等以上に
+### 2026-10-13: On par with Kissat
 
-評価方法を変更: 全 364 問のうち crabsat (旧版/新版) または Kissat が 120 秒以内に解いた
-162 問を「union」セットとし、制限 60 秒で Kissat と **同時に同じ負荷で** 実行して比較する
-(SAT は試行ごとのばらつきが大きく、別々の時刻の計測は比較できないため)。
+New evaluation: the "union" set described above, run simultaneously with
+Kissat.
 
-主な改善:
-- congruence 前の 2リテラル節抽出 (3リテラル節 + 2リテラル節 → 2リテラル節)
-- congruence の unit 検出: `(l | o)` と `(l | !o)` から `l` (factor 後の大規模問題で効果大)
-- compact (変数の詰め直し、外部/内部番号の分離)
-- 簡約処理の遅延 (congruence / sweep / 既約節 vivify)、factor の最小削減量 3
-- congruence の高速化 (FxHash、ITE 正規化、XOR のソートによるグループ化)
+Main improvements:
+- Binary clause extraction before congruence closure (ternary clause + binary
+  clause → binary clause)
+- Units in congruence closure: `(l | o)` and `(l | !o)` imply `l` (large
+  effect on big industrial instances after factorization)
+- Compact (variable renumbering, separate external/internal numbering)
+- Delays for unproductive simplifications (congruence / sweeping /
+  irredundant vivification), minimum factorization reduction of 3
+- Faster congruence (FxHash, canonical ITE gates, XOR grouping by sorting)
 
-| union 162 問 / 60 秒 | 解けた数 | SAT | UNSAT | PAR-2 |
+| union, 162 instances / 60 s | solved | SAT | UNSAT | PAR-2 |
 |---|---|---|---|---|
-| crabsat (1 回目) | 94 | 46 | 48 | 9404 |
-| Kissat 4.0.4 (1 回目) | 91 | 48 | 43 | 9775 |
-| crabsat (2 回目) | 93 | 45 | 48 | 9477 |
-| Kissat 4.0.4 (2 回目) | 93 | 48 | 45 | 9625 |
+| crabsat (run 1) | 94 | 46 | 48 | 9404 |
+| Kissat 4.0.4 (run 1) | 91 | 48 | 43 | 9775 |
+| crabsat (run 2) | 93 | 45 | 48 | 9477 |
+| Kissat 4.0.4 (run 2) | 93 | 48 | 45 | 9625 |
 
-UNSAT では上回り、SAT ではまだ 2〜3 問少ない。
+Better on UNSAT, still 2–3 SAT instances behind at this point.
 
-### 2026-10-13: マルチコア (ポートフォリオ) の強化
+Closing the SAT gap: with three seeds per solver on the SAT instances both
+solvers were already close on average (Kissat 37.7 vs crabsat 36.3 solved,
+total time 8624 s vs 8651 s).  The consistent difference came from tiny
+instances which Kissat solves with lucky assignments before preprocessing.
+crabsat now tries lucky assignments before preprocessing as well and restores
+the complete search state if they fail (propagation otherwise moves watches
+and perturbs the later search).
 
-- 学習節の共有: 元の変数だけからなる 2リテラル節と glue <= 2・長さ <= 8 の学習節を、
-  500 衝突ごとの restart で交換し、root レベルで取り込む (除去済み変数を含む節は捨てる)。
-- 多様化の見直し (常に stable / 負の位相 / focused でも target 位相 / stable+負の位相 /
-  walk 強化 / randec・reorder なし / focused のみ)。
-- 1 つの前処理済みソルバを複製する方式も試したが、各スレッドが自分の設定で並列に前処理する
-  ほうが良かった (124 対 126 問) ため不採用。
-- lucky を前処理の前にも試す (失敗時は状態を完全に戻す)。
+### 2026-10-13: Multi-core (portfolio)
 
-| union 162 問 / 60 秒 | 解けた数 | SAT | UNSAT | PAR-2 |
+- Learned clause sharing: binary clauses and learned clauses with glue <= 2
+  and size <= 8 over original variables are exchanged during restarts every
+  500 conflicts and imported at the root level (clauses with eliminated
+  variables are skipped).
+- New diversification (always stable / negative phase / target phases in
+  focused mode / stable with negative phase / stronger walk / without random
+  decisions and reordering / focused only).
+- Cloning a single preprocessed solver for all members was tried but was
+  worse than letting every member preprocess with its own options in parallel
+  (124 vs 126 solved), so it is not used.
+
+| union, 162 instances / 60 s | solved | SAT | UNSAT | PAR-2 |
 |---|---|---|---|---|
-| Kissat 4.0.4 (単独) | 92 | 49 | 43 | 9632 |
-| crabsat 単独 | 97 | 49 | 48 | 9258 |
-| crabsat 4 スレッド | 121 | 71 | 50 | 6734 |
-| crabsat 8 スレッド (unit 共有のみ, 旧多様化) | 116 | 65 | 51 | 7143 |
-| crabsat 8 スレッド (節共有, 新多様化) | 125 | 72 | 53 | 6290 |
-| crabsat 16 スレッド | 126 | 72 | 54 | 6048 |
+| Kissat 4.0.4 (single thread) | 92 | 49 | 43 | 9632 |
+| crabsat single thread | 97 | 49 | 48 | 9258 |
+| crabsat 4 threads | 121 | 71 | 50 | 6734 |
+| crabsat 8 threads (unit sharing only, old diversification) | 116 | 65 | 51 | 7143 |
+| crabsat 8 threads (clause sharing, new diversification) | 125 | 72 | 53 | 6290 |
+| crabsat 16 threads | 126 | 72 | 54 | 6048 |
 
-(行ごとに計測時の負荷が異なるため、同時計測した行どうし以外の比較は目安)
+(Rows were measured under different machine loads; only rows measured
+simultaneously are directly comparable.)

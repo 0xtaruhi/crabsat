@@ -56,7 +56,7 @@ crabsat or Kissat 4.0.4 within 120 s, 60 s time limit, same machine load):
 | crabsat | 97 | 49 | 48 | 9258 |
 | crabsat `--threads=8` | 125 | 72 | 53 | 6290 |
 
-See [ROADMAP.md](ROADMAP.md) for the development log (in Japanese).
+See [ROADMAP.md](ROADMAP.md) for the roadmap and development log.
 
 ## Testing
 
