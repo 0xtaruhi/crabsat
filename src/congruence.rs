@@ -110,6 +110,9 @@ impl Solver {
         self.stats.congruences += 1;
         let t = std::time::Instant::now();
         let gates = self.extract_gates();
+        if self.inconsistent {
+            return false;
+        }
         if self.verbose(3) {
             println!("c [congruence] extract total {:.2}s", t.elapsed().as_secs_f64());
         }
@@ -212,6 +215,50 @@ impl Solver {
         extracted
     }
 
+    /// Binary clauses `(l | o)` and `(l | !o)` imply the unit `l` (Kissat
+    /// `find_units`).  Returns false on inconsistency.
+    fn find_binary_units(&mut self) -> bool {
+        let mut marked: Vec<Lit> = Vec::new();
+        let mut units = 0;
+        for idx in 0..self.watches.len() {
+            let lit = Lit(idx as u32);
+            if self.value(lit) != 0 || self.flags[lit.vidx()] & ELIMINATED != 0 {
+                continue;
+            }
+            let mut unit = false;
+            for w in watch::iter(&self.watches[idx]) {
+                let Watch::Binary(other) = w else { continue };
+                if self.value(other) != 0 {
+                    continue;
+                }
+                if self.marks[(!other).idx()] != 0 {
+                    unit = true;
+                    break;
+                }
+                if self.marks[other.idx()] == 0 {
+                    self.marks[other.idx()] = 1;
+                    marked.push(other);
+                }
+            }
+            for l in marked.drain(..) {
+                self.marks[l.idx()] = 0;
+            }
+            if unit {
+                units += 1;
+                self.learned_unit(lit);
+                if self.propagate().is_some() {
+                    self.mark_inconsistent();
+                    return false;
+                }
+            }
+        }
+        self.stats.congruent_units += units;
+        if units > 0 && self.verbose(2) {
+            println!("c [congruence-{}] found {} units", self.stats.congruences, units);
+        }
+        true
+    }
+
     fn extract_gates(&mut self) -> Vec<Gate> {
         if self.opts.congruencebinaries {
             let t = std::time::Instant::now();
@@ -222,6 +269,9 @@ impl Solver {
             if self.verbose(2) {
                 println!("c [congruence-{}] extracted {} binaries", self.stats.congruences, n);
             }
+        }
+        if !self.find_binary_units() {
+            return Vec::new();
         }
         let n = 2 * self.vars;
         // Occurrences of irredundant large clauses of size <= 5 (for ITE and
