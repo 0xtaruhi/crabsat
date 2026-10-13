@@ -21,6 +21,10 @@ pub struct Analysis {
     pub shrinkable: Vec<Var>,
     pub minimize_stack: Vec<Var>,
     pub promote_levels: Vec<u32>,
+    /// Bumped variables ranked by enqueue stamp (`stamp << 32 | var`).
+    pub ranked: Vec<u64>,
+    /// Literals of the deduced clause with their levels (for sorting).
+    pub leveled: Vec<(u32, Lit)>,
     pub antecedent_size: u32,
     pub resolvent_size: u32,
 }
@@ -411,9 +415,21 @@ impl Solver {
 
     /// Sort literals after the UIP by decreasing level (needed by shrinking).
     fn sort_deduced_clause(&mut self) {
+        // Sort (level, literal) pairs on the level to avoid an indirection
+        // per comparison.
+        let mut leveled = std::mem::take(&mut self.analysis.leveled);
+        leveled.clear();
         let assigned = &self.assigned;
-        self.analysis.clause[1..]
-            .sort_unstable_by_key(|l| std::cmp::Reverse(assigned[l.vidx()].level));
+        leveled.extend(
+            self.analysis.clause[1..]
+                .iter()
+                .map(|&l| (assigned[l.vidx()].level, l)),
+        );
+        leveled.sort_unstable_by_key(|&(level, _)| std::cmp::Reverse(level));
+        for (k, &(_, l)) in leveled.iter().enumerate() {
+            self.analysis.clause[k + 1] = l;
+        }
+        self.analysis.leveled = leveled;
     }
 
     #[inline]
@@ -1014,14 +1030,23 @@ impl Solver {
             }
             self.bump_score_increment();
         } else {
-            let mut ranked = std::mem::take(&mut self.analysis.analyzed);
+            // Sort by enqueue stamp (unique), keyed without indirection.
+            let mut ranked = std::mem::take(&mut self.analysis.ranked);
+            ranked.clear();
             let links = &self.queue.links;
-            ranked.sort_unstable_by_key(|&v| links[v as usize].stamp);
-            for &v in &ranked {
+            ranked.extend(
+                self.analysis
+                    .analyzed
+                    .iter()
+                    .map(|&v| ((links[v as usize].stamp as u64) << 32) | v as u64),
+            );
+            ranked.sort_unstable();
+            for &r in &ranked {
+                let v = r as Var;
                 let assigned = self.values[Lit::new(v, false).idx()] != 0;
                 self.queue.move_to_front(v, assigned);
             }
-            self.analysis.analyzed = ranked;
+            self.analysis.ranked = ranked;
         }
     }
 

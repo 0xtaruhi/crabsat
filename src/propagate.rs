@@ -76,8 +76,12 @@ impl Solver {
             stats,
             ..
         } = self;
-        let mem = &mut arena.mem;
-        let saved = &mut phases.saved;
+        // Plain slices (pointer and length in registers): through `&mut Vec`
+        // the compiler reloads the buffer pointers after every store.
+        let values = values.as_mut_slice();
+        let assigned = assigned.as_mut_slice();
+        let mem = arena.mem.as_mut_slice();
+        let saved = phases.saved.as_mut_slice();
         debug_assert!(delayed.is_empty());
 
         // Assign `$lit` at `$level` with the given reason.
@@ -108,7 +112,8 @@ impl Solver {
             }};
         }
 
-        let ws = &mut watches[not_lit.idx()];
+        let watch_list = &mut watches[not_lit.idx()];
+        let ws = watch_list.as_mut_slice();
         let n = ws.len();
         let mut ticks = 1 + (n as u64 * 4).div_ceil(64);
         let (mut i, mut j) = (0usize, 0usize);
@@ -219,7 +224,7 @@ impl Solver {
             i += 1;
             j += 1;
         }
-        ws.truncate(j);
+        watch_list.truncate(j);
         if probing {
             stats.probing_ticks += ticks;
         } else {

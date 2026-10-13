@@ -33,52 +33,54 @@ impl Heap {
         self.heap[0]
     }
 
-    #[inline]
-    fn less(&self, a: Var, b: Var) -> bool {
-        self.score[a as usize] < self.score[b as usize]
-    }
-
     fn up(&mut self, v: Var) {
-        let mut i = self.pos[v as usize] as usize;
+        let (score, pos, heap) = (&self.score[..], &mut self.pos[..], &mut self.heap[..]);
+        let s = score[v as usize];
+        let mut i = pos[v as usize] as usize;
         while i > 0 {
             let parent_i = (i - 1) / 2;
-            let parent = self.heap[parent_i];
-            if !self.less(parent, v) {
+            let parent = heap[parent_i];
+            if score[parent as usize] >= s {
                 break;
             }
-            self.heap[i] = parent;
-            self.pos[parent as usize] = i as u32;
+            heap[i] = parent;
+            pos[parent as usize] = i as u32;
             i = parent_i;
         }
-        self.heap[i] = v;
-        self.pos[v as usize] = i as u32;
+        heap[i] = v;
+        pos[v as usize] = i as u32;
     }
 
     fn down(&mut self, v: Var) {
-        let n = self.heap.len();
-        let mut i = self.pos[v as usize] as usize;
+        let (score, pos, heap) = (&self.score[..], &mut self.pos[..], &mut self.heap[..]);
+        let n = heap.len();
+        let s = score[v as usize];
+        let mut i = pos[v as usize] as usize;
         loop {
             let mut child_i = 2 * i + 1;
             if child_i >= n {
                 break;
             }
-            let mut child = self.heap[child_i];
+            let mut child = heap[child_i];
+            let mut child_score = score[child as usize];
             if child_i + 1 < n {
-                let right = self.heap[child_i + 1];
-                if self.less(child, right) {
+                let right = heap[child_i + 1];
+                let right_score = score[right as usize];
+                if child_score < right_score {
                     child_i += 1;
                     child = right;
+                    child_score = right_score;
                 }
             }
-            if !self.less(v, child) {
+            if s >= child_score {
                 break;
             }
-            self.heap[i] = child;
-            self.pos[child as usize] = i as u32;
+            heap[i] = child;
+            pos[child as usize] = i as u32;
             i = child_i;
         }
-        self.heap[i] = v;
-        self.pos[v as usize] = i as u32;
+        heap[i] = v;
+        pos[v as usize] = i as u32;
     }
 
     pub(crate) fn push(&mut self, v: Var) {

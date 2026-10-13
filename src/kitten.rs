@@ -8,6 +8,7 @@
 use crate::types::Lit;
 
 const NO_REASON: u32 = u32::MAX;
+const NONE: u32 = u32::MAX;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum KittenResult {
@@ -30,9 +31,17 @@ pub struct Kitten {
     propagated: usize,
     /// Trail position of each decision level.
     control: Vec<usize>,
-    /// Variables ordered by activity (move-to-front list).
+    /// Bump stamps (unique): decisions take the unassigned variable with
+    /// the largest stamp.
     stamp: Vec<u64>,
     stamp_counter: u64,
+    /// Variables as a list ordered by decreasing stamp (VMTF queue):
+    /// `next` points to the variable with the next smaller stamp.
+    next: Vec<u32>,
+    prev: Vec<u32>,
+    head: u32,
+    /// All variables with larger stamps than `search` are assigned.
+    search: u32,
     phases: Vec<bool>,
     seen: Vec<bool>,
     /// The formula is inconsistent (empty clause derived).
@@ -52,6 +61,12 @@ impl Kitten {
             reasons: vec![NO_REASON; vars],
             stamp: (0..vars as u64).collect(),
             stamp_counter: vars as u64,
+            next: (0..vars as u32).map(|v| v.wrapping_sub(1)).collect(),
+            prev: (0..vars as u32)
+                .map(|v| if v + 1 < vars as u32 { v + 1 } else { NONE })
+                .collect(),
+            head: (vars as u32).wrapping_sub(1),
+            search: (vars as u32).wrapping_sub(1),
             phases: vec![false; vars],
             seen: vec![false; vars],
             ..Default::default()
@@ -191,6 +206,10 @@ impl Kitten {
             self.values[(!l).idx()] = 0;
             self.phases[l.vidx()] = !l.negated();
             self.reasons[l.vidx()] = NO_REASON;
+            let v = l.var();
+            if self.search == NONE || self.stamp[v as usize] > self.stamp[self.search as usize] {
+                self.search = v;
+            }
         }
         self.trail.truncate(pos);
         self.control.truncate(level as usize);
@@ -243,6 +262,7 @@ impl Kitten {
             self.seen[v] = false;
             self.stamp_counter += 1;
             self.stamp[v] = self.stamp_counter;
+            self.move_to_front(v as u32);
         }
         let mut jump = 0;
         let mut pos = 0;
@@ -259,19 +279,34 @@ impl Kitten {
         (learned, jump)
     }
 
-    fn decide(&mut self) -> bool {
-        self.ticks += 1 + self.vars as u64 / 16;
-        let mut best = usize::MAX;
-        let mut best_stamp = 0;
-        for v in 0..self.vars {
-            if self.values[2 * v] == 0 && (best == usize::MAX || self.stamp[v] > best_stamp) {
-                best = v;
-                best_stamp = self.stamp[v];
-            }
+    fn move_to_front(&mut self, v: u32) {
+        if self.head == v {
+            return;
         }
-        if best == usize::MAX {
+        let (p, n) = (self.prev[v as usize], self.next[v as usize]);
+        self.next[p as usize] = n;
+        if n != NONE {
+            self.prev[n as usize] = p;
+        }
+        self.prev[v as usize] = NONE;
+        self.next[v as usize] = self.head;
+        self.prev[self.head as usize] = v;
+        self.head = v;
+    }
+
+    fn decide(&mut self) -> bool {
+        // Ticks model the cost of the original linear scan (and thus the
+        // effort limits of sweeping).
+        self.ticks += 1 + self.vars as u64 / 16;
+        let mut v = self.search;
+        while v != NONE && self.values[2 * v as usize] != 0 {
+            v = self.next[v as usize];
+        }
+        if v == NONE {
             return false;
         }
+        self.search = v;
+        let best = v as usize;
         self.control.push(self.trail.len());
         let lit = Lit::new(best as u32, !self.phases[best]);
         self.assign(lit, NO_REASON);

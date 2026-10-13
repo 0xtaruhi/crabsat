@@ -31,6 +31,8 @@ struct Factoring {
     initial: u32,
     /// Occurrences of candidate large clauses (size <= factorsize).
     occs: Vec<Vec<CRef>>,
+    /// Number of binary clauses of each literal (kept up to date).
+    binaries: Vec<u32>,
     count: Vec<u32>,
     counted: Vec<Lit>,
     nounted: Vec<Lit>,
@@ -109,10 +111,25 @@ impl Solver {
 
     /// Binary clauses plus candidate large clauses containing `lit`.
     fn occurrences(&self, f: &Factoring, lit: Lit) -> usize {
-        let binaries = watch::iter(&self.watches[lit.idx()])
-            .filter(|w| matches!(w, Watch::Binary(_)))
-            .count();
-        binaries + f.occs[lit.idx()].len()
+        debug_assert_eq!(
+            f.binaries[lit.idx()] as usize,
+            watch::iter(&self.watches[lit.idx()])
+                .filter(|w| matches!(w, Watch::Binary(_)))
+                .count()
+        );
+        f.binaries[lit.idx()] as usize + f.occs[lit.idx()].len()
+    }
+
+    fn count_binaries(&self, f: &mut Factoring) {
+        f.binaries = self
+            .watches
+            .iter()
+            .map(|ws| {
+                watch::iter(ws)
+                    .filter(|w| matches!(w, Watch::Binary(_)))
+                    .count() as u32
+            })
+            .collect();
     }
 
     fn run_factorization(&mut self, limit: u64) -> bool {
@@ -120,6 +137,7 @@ impl Solver {
         let mut f = Factoring {
             initial: n as u32,
             occs: vec![Vec::new(); n],
+            binaries: Vec::new(),
             count: vec![0; n],
             counted: Vec::new(),
             nounted: Vec::new(),
@@ -130,6 +148,7 @@ impl Solver {
             limit,
         };
         self.connect_factor_candidates(&mut f);
+        self.count_binaries(&mut f);
         // Schedule candidate literals by number of occurrences (a max-heap
         // with lazy updates, as candidates change after each factoring).
         let mut schedule: std::collections::BinaryHeap<(usize, std::cmp::Reverse<Lit>)> =
@@ -489,6 +508,7 @@ impl Solver {
         let fresh = Lit::new(fresh_var, false);
         f.count.resize(2 * self.vars, 0);
         f.occs.resize(2 * self.vars, Vec::new());
+        f.binaries.resize(2 * self.vars, 0);
         self.stats.factored += 1;
         // Dividers (fresh | factor), fresh literal first for RAT.
         for p in 0..=q {
@@ -497,6 +517,8 @@ impl Solver {
                 proof.add(&[fresh, factor]);
             }
             self.new_binary(fresh, factor);
+            f.binaries[fresh.idx()] += 1;
+            f.binaries[factor.idx()] += 1;
         }
         // Quotients (!fresh | C_j).
         let quotient_factor = f.quotients[q].factor;
@@ -508,6 +530,8 @@ impl Solver {
                         proof.add(&[!fresh, other]);
                     }
                     self.new_binary(!fresh, other);
+                    f.binaries[(!fresh).idx()] += 1;
+                    f.binaries[other.idx()] += 1;
                 }
                 Entry::Large(c) => {
                     let mut lits = vec![!fresh];
@@ -534,7 +558,9 @@ impl Solver {
                 match entry {
                     Entry::Binary(other) => {
                         touched.push(other);
-                        self.delete_binary(factor, other, true)
+                        self.delete_binary(factor, other, true);
+                        f.binaries[factor.idx()] -= 1;
+                        f.binaries[other.idx()] -= 1;
                     }
                     Entry::Large(c) => {
                         if !self.arena.garbage(c) {
