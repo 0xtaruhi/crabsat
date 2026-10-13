@@ -184,10 +184,10 @@ impl Solver {
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(o) = w
-                    && lit < o
-                {
-                    bins.insert((lit, o));
+                if let Watch::Binary(o) = w {
+                    if lit < o {
+                        bins.insert((lit, o));
+                    }
                 }
             }
         }
@@ -387,12 +387,11 @@ impl Solver {
             }
             let mut marked = Vec::new();
             for w in watch::iter(&self.watches[(!lhs).idx()]) {
-                if let Watch::Binary(other) = w
-                    && self.value(other) == 0
-                    && self.marks[other.idx()] == 0
-                {
-                    self.marks[other.idx()] = 1;
-                    marked.push(other);
+                if let Watch::Binary(other) = w {
+                    if self.value(other) == 0 && self.marks[other.idx()] == 0 {
+                        self.marks[other.idx()] = 1;
+                        marked.push(other);
+                    }
                 }
             }
             if marked.len() >= 2 {
@@ -706,10 +705,10 @@ impl Solver {
             if gates[i].garbage || self.inconsistent {
                 continue;
             }
-            if let Some(old) = keys[i].take()
-                && table.get(&old) == Some(&i)
-            {
-                table.remove(&old);
+            if let Some(old) = keys[i].take() {
+                if table.get(&old) == Some(&i) {
+                    table.remove(&old);
+                }
             }
             // Equivalence (or unit) implied by gate `i`, possibly together
             // with a congruent gate `j`.

@@ -1,7 +1,7 @@
 //! crabsat: a CDCL SAT solver following the design of Kissat.
 
 // Parallel per-variable arrays are naturally indexed by variable.
-#![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks)]
+#![allow(clippy::needless_range_loop)]
 
 mod analyze;
 mod arena;

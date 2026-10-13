@@ -230,7 +230,7 @@ impl Solver {
         } else {
             stats.search_ticks += ticks;
         }
-        for d in delayed.as_chunks::<3>().0 {
+        for d in delayed.chunks_exact(3) {
             let ws = &mut watches[d[0] as usize];
             ws.push(d[1]);
             ws.push(d[2]);

@@ -104,7 +104,7 @@ impl Reluctant {
             return;
         }
         let (mut u, mut v) = (self.u, self.v);
-        if u.isolate_lowest_one() == v {
+        if u & u.wrapping_neg() == v {
             u += 1;
             v = 1;
         } else {

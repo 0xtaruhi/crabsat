@@ -319,13 +319,12 @@ impl Solver {
                 // The resolvent is the reason without `lit`.
                 let reason = a.reason;
                 let strengthened = self.on_the_fly_strengthen(reason, lit);
-                if resolved == 1
-                    && self.analysis.resolvent_size < conflict_size
-                    && let Conflict::Large(d) = conflict
-                    && !self.arena.garbage(d)
-                    && d != reason
-                {
-                    self.on_the_fly_subsume(strengthened, d);
+                if resolved == 1 && self.analysis.resolvent_size < conflict_size {
+                    if let Conflict::Large(d) = conflict {
+                        if !self.arena.garbage(d) && d != reason {
+                            self.on_the_fly_subsume(strengthened, d);
+                        }
+                    }
                 }
                 return Some(strengthened);
             }

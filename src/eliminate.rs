@@ -250,12 +250,11 @@ impl Solver {
         // Mark all li with binary clauses (!lit | li).
         let mut marked = Vec::new();
         for occ in &neg.occs {
-            if let Occ::Binary(other) = *occ
-                && self.value(other) == 0
-                && self.marks[other.idx()] == 0
-            {
-                self.marks[other.idx()] = 1;
-                marked.push(other);
+            if let Occ::Binary(other) = *occ {
+                if self.value(other) == 0 && self.marks[other.idx()] == 0 {
+                    self.marks[other.idx()] = 1;
+                    marked.push(other);
+                }
             }
         }
         let mut found = None;
@@ -289,11 +288,11 @@ impl Solver {
                 }
             }
             for (m, occ) in neg.occs.iter().enumerate() {
-                if let Occ::Binary(other) = *occ
-                    && self.marks[other.idx()] != 0
-                {
-                    neg.gate[m] = true;
-                    self.marks[other.idx()] = 0; // only one binary per input
+                if let Occ::Binary(other) = *occ {
+                    if self.marks[other.idx()] != 0 {
+                        neg.gate[m] = true;
+                        self.marks[other.idx()] = 0; // only one binary per input
+                    }
                 }
             }
             for &l in &lits {

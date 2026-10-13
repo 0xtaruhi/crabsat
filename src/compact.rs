@@ -91,10 +91,10 @@ impl Solver {
                 continue;
             }
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w
-                    && map[other.vidx()] != UNMAPPED
-                {
-                    watch::push_binary(&mut watches[map_lit(lit).idx()], map_lit(other));
+                if let Watch::Binary(other) = w {
+                    if map[other.vidx()] != UNMAPPED {
+                        watch::push_binary(&mut watches[map_lit(lit).idx()], map_lit(other));
+                    }
                 }
             }
         }

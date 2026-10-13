@@ -257,10 +257,10 @@ pub fn parse<R: Read>(
         if digits == 0 {
             return Err(err(b.line, "expected literal"));
         }
-        if let Some(ch) = c
-            && !ch.is_ascii_whitespace()
-        {
-            return Err(err(b.line, "expected white space after literal"));
+        if let Some(ch) = c {
+            if !ch.is_ascii_whitespace() {
+                return Err(err(b.line, "expected white space after literal"));
+            }
         }
         if value == 0 {
             if negative {

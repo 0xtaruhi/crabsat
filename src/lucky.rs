@@ -175,11 +175,11 @@ impl Solver {
         for idx in 0..2 * self.vars {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w
-                    && lit < other
-                {
-                    weights[lit.idx()] += table[2];
-                    weights[other.idx()] += table[2];
+                if let Watch::Binary(other) = w {
+                    if lit < other {
+                        weights[lit.idx()] += table[2];
+                        weights[other.idx()] += table[2];
+                    }
                 }
             }
         }

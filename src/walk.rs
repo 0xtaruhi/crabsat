@@ -86,10 +86,10 @@ impl Solver {
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w
-                    && lit < other
-                {
-                    push_clause(self, &mut [lit, other].into_iter());
+                if let Watch::Binary(other) = w {
+                    if lit < other {
+                        push_clause(self, &mut [lit, other].into_iter());
+                    }
                 }
             }
         }

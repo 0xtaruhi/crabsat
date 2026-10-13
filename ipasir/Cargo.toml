@@ -2,6 +2,7 @@
 name = "crabsat-ipasir"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.87"
 description = "IPASIR C library (static and shared) of the crabsat SAT solver"
 license = "MIT"
 repository = "https://github.com/0xtaruhi/crabsat"

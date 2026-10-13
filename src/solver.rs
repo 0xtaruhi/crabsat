@@ -565,8 +565,10 @@ impl Solver {
         self.stats.clauses_binary -= 1;
         watch::remove_binary(&mut self.watches[a.idx()], b);
         watch::remove_binary(&mut self.watches[b.idx()], a);
-        if proof && let Some(p) = self.proof.as_mut() {
-            p.delete(&[a, b]);
+        if proof {
+            if let Some(p) = self.proof.as_mut() {
+                p.delete(&[a, b]);
+            }
         }
     }
 
@@ -674,11 +676,11 @@ impl Solver {
         if satisfied {
             return;
         }
-        if simplified.len() != lits.len()
-            && let Some(p) = self.proof.as_mut()
-        {
-            p.add(&simplified);
-            p.delete(lits);
+        if simplified.len() != lits.len() {
+            if let Some(p) = self.proof.as_mut() {
+                p.add(&simplified);
+                p.delete(lits);
+            }
         }
         match simplified.len() {
             0 => self.mark_inconsistent(),

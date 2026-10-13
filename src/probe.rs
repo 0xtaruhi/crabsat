@@ -120,10 +120,10 @@ impl Solver {
     fn implied_by_binaries(&self, lit: Lit, out: &mut Vec<Lit>) {
         out.clear();
         for w in watch::iter(&self.watches[(!lit).idx()]) {
-            if let Watch::Binary(other) = w
-                && self.value(other) == 0
-            {
-                out.push(other);
+            if let Watch::Binary(other) = w {
+                if self.value(other) == 0 {
+                    out.push(other);
+                }
             }
         }
     }
@@ -258,10 +258,10 @@ impl Solver {
         for idx in 0..self.watches.len() {
             let lit = Lit(idx as u32);
             for w in watch::iter(&self.watches[idx]) {
-                if let Watch::Binary(other) = w
-                    && lit < other
-                {
-                    binaries.push((lit, other));
+                if let Watch::Binary(other) = w {
+                    if lit < other {
+                        binaries.push((lit, other));
+                    }
                 }
             }
         }

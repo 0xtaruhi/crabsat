@@ -193,17 +193,18 @@ impl Solver {
                     }
                     self.factorize_next(&mut f, next);
                 }
-                if let Some((q, reduction)) = best_quotient(&f)
-                    && reduction
+                if let Some((q, reduction)) = best_quotient(&f) {
+                    if reduction
                         > (self.elimination_bound as usize)
                             .max(self.opts.factorminreduction as usize)
-                {
-                    let touched = self.apply_factoring(&mut f, q);
-                    for lit in touched {
-                        if lit.0 < f.initial && self.factor_candidate(lit) {
-                            let occs = self.occurrences(&f, lit);
-                            if occs > 1 {
-                                schedule.push((occs, std::cmp::Reverse(lit)));
+                    {
+                        let touched = self.apply_factoring(&mut f, q);
+                        for lit in touched {
+                            if lit.0 < f.initial && self.factor_candidate(lit) {
+                                let occs = self.occurrences(&f, lit);
+                                if occs > 1 {
+                                    schedule.push((occs, std::cmp::Reverse(lit)));
+                                }
                             }
                         }
                     }
