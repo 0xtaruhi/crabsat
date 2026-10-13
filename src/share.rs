@@ -9,20 +9,140 @@ use crate::solver::{Solver, ELIMINATED};
 use crate::types::Lit;
 use std::sync::Mutex;
 
+/// A learned clause exported by a portfolio member (external literals).
+pub struct SharedClause {
+    pub from: u32,
+    pub glue: u32,
+    pub lits: Vec<Lit>,
+}
+
+/// Bounded pool of shared clauses: entry `k` of the deque has global index
+/// `base + k`.
+#[derive(Default)]
+struct ClausePool {
+    base: usize,
+    clauses: std::collections::VecDeque<SharedClause>,
+}
+
+const POOL_CAPACITY: usize = 1 << 20;
+
 #[derive(Default)]
 pub struct Shared {
     units: Mutex<Vec<Lit>>,
+    clauses: Mutex<ClausePool>,
     /// Only variables below this index (original variables) are shared.
     pub vars: usize,
 }
 
 impl Shared {
     pub fn new(vars: usize) -> Shared {
-        Shared { units: Mutex::new(Vec::new()), vars }
+        Shared { vars, ..Default::default() }
     }
 }
 
 impl Solver {
+    /// Remember a learned clause for export (if short with small glue and
+    /// only on original variables).
+    pub fn export_clause(&mut self, lits: &[Lit], glue: u32) {
+        let Some(shared) = self.shared.as_ref() else { return };
+        if lits.len() > self.opts.sharesize as usize || glue > self.opts.shareglue {
+            return;
+        }
+        let mut ext = Vec::with_capacity(lits.len());
+        for &l in lits {
+            let e = self.external(l);
+            if e.vidx() >= shared.vars {
+                return;
+            }
+            ext.push(e);
+        }
+        self.export_buffer.push(SharedClause { from: self.share_id, glue, lits: ext });
+    }
+
+    /// Exchange learned clauses (called at restarts).  Imported clauses are
+    /// added at the root level.  Returns false on inconsistency.
+    pub fn share_clauses(&mut self) -> bool {
+        let Some(shared) = self.shared.clone() else { return true };
+        if !self.opts.share || self.stats.conflicts < self.last_share + self.opts.shareint {
+            return true;
+        }
+        self.last_share = self.stats.conflicts;
+        let mut new: Vec<SharedClause> = Vec::new();
+        {
+            let mut pool = shared.clauses.lock().unwrap();
+            for c in self.export_buffer.drain(..) {
+                pool.clauses.push_back(c);
+                if pool.clauses.len() > POOL_CAPACITY {
+                    pool.clauses.pop_front();
+                    pool.base += 1;
+                }
+            }
+            let start = self.imported_clauses.max(pool.base);
+            for k in start - pool.base..pool.clauses.len() {
+                let c = &pool.clauses[k];
+                if c.from != self.share_id {
+                    new.push(SharedClause { from: c.from, glue: c.glue, lits: c.lits.clone() });
+                }
+            }
+            self.imported_clauses = pool.base + pool.clauses.len();
+        }
+        if new.is_empty() {
+            return true;
+        }
+        if self.level > 0 {
+            self.backtrack_in_consistent_state(0);
+        }
+        let mut lits: Vec<Lit> = Vec::new();
+        'clauses: for c in new {
+            lits.clear();
+            for &e in &c.lits {
+                match self.internal(e) {
+                    Some(l) => {
+                        if self.flags[l.vidx()] & ELIMINATED != 0 {
+                            continue 'clauses;
+                        }
+                        match self.fixed(l) {
+                            0 => lits.push(l),
+                            v if v > 0 => continue 'clauses,
+                            _ => {}
+                        }
+                    }
+                    None => {
+                        let v = self.ext_fixed[e.vidx()];
+                        if v == 0 {
+                            continue 'clauses; // eliminated
+                        }
+                        if (v > 0) != e.negated() {
+                            continue 'clauses; // satisfied
+                        }
+                    }
+                }
+            }
+            // The root level is fully propagated, so no literal is assigned
+            // at this point unless it was fixed (handled above).
+            if lits.iter().any(|&l| self.value(l) != 0) {
+                continue;
+            }
+            self.stats.imported_clauses += 1;
+            match lits.len() {
+                0 => {
+                    self.mark_inconsistent();
+                    return false;
+                }
+                1 => self.assign_unit(lits[0]),
+                2 => self.new_binary(lits[0], lits[1]),
+                _ => {
+                    self.new_large(&lits, true, c.glue);
+                }
+            }
+        }
+        if self.propagate().is_some() {
+            self.mark_inconsistent();
+            return false;
+        }
+        true
+    }
+
     /// Export new root-level units and import those of other solvers.
     /// Must be called at level 0 after propagation.  Returns false if the
     /// formula became inconsistent.

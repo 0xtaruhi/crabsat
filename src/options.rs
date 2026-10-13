@@ -102,6 +102,10 @@ options! {
     restartmargin: u64 = 10, "fast/slow margin in percent";
     restartreusetrail: bool = true, "restarts tries to reuse trail";
     seed: u64 = 0, "random seed";
+    share: bool = true, "share learned clauses in portfolio mode";
+    shareglue: u32 = 2, "maximum glue of shared clauses";
+    shareint: u64 = 500, "conflicts between clause exchanges";
+    sharesize: u64 = 8, "maximum size of shared clauses";
     compact: bool = true, "enable compacting variable renumbering";
     compactlim: u64 = 10, "compact inactive limit (in percent)";
     tumble: bool = false, "initial decision order by first occurrence";

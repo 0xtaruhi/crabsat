@@ -253,6 +253,7 @@ fn portfolio(
             let finish = &finish;
             scope.spawn(move || {
                 let mut s = Solver::new(diversify(base, i));
+                s.share_id = i as u32;
                 s.reserve_vars(vars);
                 for c in clauses {
                     s.add_clause_dimacs(c);

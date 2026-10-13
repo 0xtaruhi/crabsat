@@ -38,6 +38,9 @@ impl Solver {
         }
         self.start_search();
         let res = loop {
+            if self.inconsistent {
+                break SolveResult::Unsat;
+            }
             if let Some(conflict) = self.propagate() {
                 if !self.analyze(conflict) {
                     break SolveResult::Unsat;
@@ -315,6 +318,18 @@ impl Solver {
 
     fn restart(&mut self) {
         self.stats.restarts += 1;
+        if self.shared.is_some() {
+            if !self.share_clauses() {
+                return;
+            }
+            if self.level == 0 {
+                // Clauses were imported at the root level.
+                if !self.stable {
+                    self.update_focused_restart_limit();
+                }
+                return;
+            }
+        }
         let level = self.reuse_trail();
         self.backtrack_in_consistent_state(level);
         if !self.stable {

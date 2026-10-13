@@ -781,6 +781,11 @@ impl Solver {
         let not_uip = self.clause[0];
         let size = self.clause.len();
         let glue = self.levels.len() as u32;
+        if self.shared.is_some() && size >= 2 {
+            let lits = std::mem::take(&mut self.clause);
+            self.export_clause(&lits, glue);
+            self.clause = lits;
+        }
         self.update_learned(glue, size);
         let mut learned = INVALID_REF;
         if size == 1 {
