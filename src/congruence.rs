@@ -146,7 +146,66 @@ impl Solver {
     // ------------------------------------------------------------------
     // Gate extraction.
 
+    /// Derive binary clauses from ternary clauses: `(a | b | c)` and
+    /// `(!a | b)` (or `(!a | c)`) give `(b | c)`, which subsumes the ternary
+    /// clause (Kissat `extract_binaries`).  Returns the number extracted.
+    fn extract_binaries(&mut self) -> usize {
+        let mut bins: std::collections::HashSet<(Lit, Lit)> = Default::default();
+        let key = |a: Lit, b: Lit| if a < b { (a, b) } else { (b, a) };
+        for idx in 0..self.watches.len() {
+            let lit = Lit(idx as u32);
+            for w in watch::iter(&self.watches[idx]) {
+                if let Watch::Binary(o) = w {
+                    if lit < o {
+                        bins.insert((lit, o));
+                    }
+                }
+            }
+        }
+        let mut extracted = 0;
+        let mut c = 0;
+        while (c as usize) < self.arena.len() {
+            let next = self.arena.next(c);
+            if !self.arena.garbage(c) && !self.arena.redundant(c) && self.arena.size(c) == 3 {
+                let l = self.arena.lits(c);
+                let (a, b, cc) = (l[0], l[1], l[2]);
+                if self.value(a) == 0 && self.value(b) == 0 && self.value(cc) == 0 {
+                    let has = |x: Lit, y: Lit| bins.contains(&key(x, y));
+                    let pair = if has(!a, b) || has(!a, cc) {
+                        Some((b, cc))
+                    } else if has(!b, a) || has(!b, cc) {
+                        Some((a, cc))
+                    } else if has(!cc, a) || has(!cc, b) {
+                        Some((a, b))
+                    } else {
+                        None
+                    };
+                    if let Some((x, y)) = pair {
+                        if bins.insert(key(x, y)) {
+                            if let Some(p) = self.proof.as_mut() {
+                                p.add(&[x, y]);
+                            }
+                            self.new_binary(x, y);
+                            extracted += 1;
+                        }
+                        // The ternary clause is subsumed by the binary one.
+                        self.mark_garbage(c);
+                    }
+                }
+            }
+            c = next;
+        }
+        self.stats.congruent_binaries += extracted as u64;
+        extracted
+    }
+
     fn extract_gates(&mut self) -> Vec<Gate> {
+        if self.opts.congruencebinaries {
+            let n = self.extract_binaries();
+            if self.verbose(2) {
+                println!("c [congruence-{}] extracted {} binaries", self.stats.congruences, n);
+            }
+        }
         let n = 2 * self.vars;
         // Occurrences of irredundant large clauses of size <= 5 (for ITE and
         // XOR) and all sizes (for AND base clauses).
@@ -162,6 +221,32 @@ impl Solver {
                 }
             }
             c = next;
+        }
+        if self.verbose(4) {
+            // Debugging: naive AND gate count via a binary clause set.
+            let mut bins = std::collections::HashSet::new();
+            for idx in 0..self.watches.len() {
+                for w in watch::iter(&self.watches[idx]) {
+                    if let Watch::Binary(o) = w {
+                        bins.insert((Lit(idx as u32), o));
+                    }
+                }
+            }
+            let mut naive = 0;
+            let mut c = 0;
+            while (c as usize) < self.arena.len() {
+                let next = self.arena.next(c);
+                if !self.arena.garbage(c) && !self.arena.redundant(c) {
+                    let lits = self.arena.lits(c);
+                    for &lhs in lits {
+                        if lits.iter().all(|&q| q == lhs || bins.contains(&(!lhs, !q))) {
+                            naive += 1;
+                        }
+                    }
+                }
+                c = next;
+            }
+            println!("c [congruence] naive AND gate count {naive} (binaries {})", bins.len() / 2);
         }
         let mut gates = Vec::new();
         if self.opts.congruenceands {

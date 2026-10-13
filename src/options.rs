@@ -148,6 +148,7 @@ options! {
     congruence: bool = true, "congruence closure on extracted gates";
     congruenceandarity: u64 = 1_000_000, "AND gate arity limit";
     congruenceands: bool = true, "extract AND gates for congruence closure";
+    congruencebinaries: bool = true, "extract binary clauses from ternary ones";
     congruenceites: bool = true, "extract ITE gates for congruence closure";
     congruencexorarity: u64 = 4, "congruence XOR gate arity limit";
     congruencexors: bool = true, "extract XOR gates for congruence closure";
