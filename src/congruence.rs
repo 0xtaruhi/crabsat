@@ -104,7 +104,7 @@ impl Solver {
     /// Run congruence closure.  Returns false on inconsistency.
     fn congruence_untimed(&mut self) -> bool {
         debug_assert_eq!(self.level, 0);
-        if !self.opts.congruence {
+        if !self.opts.congruence || self.delay_congruence.delaying() {
             return true;
         }
         self.stats.congruences += 1;
@@ -120,9 +120,16 @@ impl Solver {
             );
         }
         if gates.is_empty() {
+            self.delay_congruence.bump();
             return true;
         }
         let equivalences = self.close_congruences(gates);
+        let active = (self.vars as u32 - self.eliminated).max(1);
+        if (equivalences as f64) / (active as f64) < 0.001 {
+            self.delay_congruence.bump();
+        } else {
+            self.delay_congruence.reduce();
+        }
         if self.verbose(2) {
             println!("c [congruence-{}] found {} equivalences", self.stats.congruences, equivalences);
         }

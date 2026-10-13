@@ -102,6 +102,7 @@ options! {
     restartmargin: u64 = 10, "fast/slow margin in percent";
     restartreusetrail: bool = true, "restarts tries to reuse trail";
     seed: u64 = 0, "random seed";
+    tumble: bool = false, "initial decision order by first occurrence";
     shrink: u32 = 3, "learned clauses (1=bin,2=lrg,3=rec)";
     stable: u32 = 1, "enable stable search mode (0=focused,1=switch,2=stable)";
     target: u32 = 1, "target phases (1=stable,2=focused)";

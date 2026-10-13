@@ -106,12 +106,13 @@ impl Solver {
                 occs[l.idx()].push(ci as u32);
             }
         }
-        // Initial assignment from saved phases.
+        // Initial assignment from the decision phases (target phases first
+        // in stable mode), as Kissat's `import_decision_phases`.
         let mut value: Vec<bool> = (0..self.vars)
             .map(|v| {
                 let pos = Lit::new(v as u32, false);
                 match self.fixed(pos) {
-                    0 => self.phases.saved[v] > 0,
+                    0 => self.decide_phase(v as u32) > 0,
                     f => f > 0,
                 }
             })
@@ -233,6 +234,10 @@ impl Solver {
                 "c [walk-{}] {} flips, unsatisfied clauses {} -> {} of {}",
                 self.stats.walks, flips, initial, minimum, clauses
             );
+        }
+        if minimum == initial {
+            // No improvement: keep the saved phases.
+            return;
         }
         for v in 0..self.vars {
             if self.flags[v] & ELIMINATED != 0 || self.fixed(Lit::new(v as u32, false)) != 0 {

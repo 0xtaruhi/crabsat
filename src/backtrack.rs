@@ -9,7 +9,8 @@ impl Solver {
         if !self.stable || self.probing {
             return;
         }
-        let assigned = self.assigned_count();
+        // Only active (not eliminated) variables count, as in Kissat.
+        let assigned = self.assigned_count() - self.eliminated;
         if self.target_assigned < assigned {
             self.target_assigned = assigned;
             save_phases(&self.values, &mut self.phases.target);

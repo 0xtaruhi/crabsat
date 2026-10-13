@@ -45,6 +45,7 @@ impl Solver {
         let delta = self.opts.probeint as f64 * nlogpown(self.stats.probings, 1);
         self.limits.probe_conflicts = self.stats.conflicts + self.scale_delta(delta as u64);
         self.last_probe_ticks = self.stats.search_ticks;
+        self.recount_phase_heights();
         self.report('p');
         !self.inconsistent
     }
@@ -450,10 +451,12 @@ impl Solver {
             self.opts.vivifyirr,
         ];
         let sum: u64 = shares.iter().sum::<u64>().max(1);
+        let irr_delayed = self.delay_vivifyirr.delaying();
         for (tier, share) in shares.iter().enumerate() {
-            if *share == 0 {
+            if *share == 0 || (tier == 3 && irr_delayed) {
                 continue;
             }
+            let (vivified_before, checks_before) = (self.stats.vivified, self.stats.vivify_checks);
             let mut candidates: Vec<CRef> = Vec::new();
             let mut c = 0;
             while (c as usize) < self.arena.len() {
@@ -479,6 +482,14 @@ impl Solver {
             let limit = self.stats.probing_ticks + total * share / sum;
             if !self.vivify_clauses(candidates, limit) {
                 return false;
+            }
+            if tier == 3 {
+                let tried = (self.stats.vivify_checks - checks_before).max(1);
+                if ((self.stats.vivified - vivified_before) as f64) / (tried as f64) < 0.01 {
+                    self.delay_vivifyirr.bump();
+                } else {
+                    self.delay_vivifyirr.reduce();
+                }
             }
         }
         true

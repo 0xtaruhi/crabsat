@@ -16,6 +16,7 @@ impl Solver {
             self.mark_inconsistent();
             return SolveResult::Unsat;
         }
+        self.apply_initial_order();
         if !self.preprocess() {
             return SolveResult::Unsat;
         }
@@ -64,12 +65,38 @@ impl Solver {
                 self.decide();
             }
         };
+        self.account_mode_time();
         self.report(match res {
             SolveResult::Sat => '1',
             SolveResult::Unsat => '0',
             SolveResult::Unknown => '?',
         });
         res
+    }
+
+    /// Initial decision order by first occurrence of variables in the
+    /// input (Kissat's "tumbled" external indices): variables seen first
+    /// are decided last in focused mode and first in stable mode.
+    fn apply_initial_order(&mut self) {
+        if !self.opts.tumble || self.stats.conflicts > 0 {
+            return;
+        }
+        let mut order: Vec<Var> = Vec::with_capacity(self.vars);
+        let mut seen = self.seen.clone();
+        seen.resize(self.vars, false);
+        for v in 0..self.vars as Var {
+            if !seen[v as usize] {
+                order.push(v);
+            }
+        }
+        order.extend_from_slice(&self.first_seen);
+        self.queue.rebuild(&order);
+        self.heap.clear();
+        for &v in &order {
+            if self.flags[v as usize] & ELIMINATED == 0 {
+                self.heap.push(v);
+            }
+        }
     }
 
     fn limit_hit(&self) -> bool {
@@ -79,6 +106,7 @@ impl Solver {
 
     fn start_search(&mut self) {
         self.stable = self.opts.stable == 2;
+        self.mode_start = self.seconds();
         let (fast, slow) = (self.opts.emafast as f64, self.opts.emaslow as f64);
         self.averages[self.stable as usize].init(fast, slow);
         if self.stable {
@@ -164,7 +192,7 @@ impl Solver {
         self.warming = false;
     }
 
-    fn decide_phase(&self, v: Var) -> i8 {
+    pub(crate) fn decide_phase(&self, v: Var) -> i8 {
         let initial: i8 = if self.opts.phase { 1 } else { -1 };
         let use_target = match self.opts.target {
             0 => false,
@@ -320,7 +348,19 @@ impl Solver {
         self.mode_ticks = self.stats.search_ticks;
     }
 
+    fn account_mode_time(&mut self) {
+        let now = self.seconds();
+        let delta = now - self.mode_start;
+        if self.stable {
+            self.stats.time_stable += delta;
+        } else {
+            self.stats.time_focused += delta;
+        }
+        self.mode_start = now;
+    }
+
     fn switch_search_mode(&mut self) {
+        self.account_mode_time();
         self.stats.switched += 1;
         self.limits.mode_count += 1;
         let delta_ticks = self.stats.search_ticks - self.mode_ticks;

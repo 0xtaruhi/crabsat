@@ -71,6 +71,8 @@ pub struct Stats {
     pub time_factor: f64,
     pub time_walk: f64,
     pub time_reduce: f64,
+    pub time_stable: f64,
+    pub time_focused: f64,
     /// Number of times clauses of a given glue were used, per mode.
     pub used: [[u64; MAX_GLUE_USED + 1]; 2],
 }
@@ -144,6 +146,8 @@ impl Default for Stats {
             time_factor: 0.0,
             time_walk: 0.0,
             time_reduce: 0.0,
+            time_stable: 0.0,
+            time_focused: 0.0,
             used: [[0; MAX_GLUE_USED + 1]; 2],
         }
     }

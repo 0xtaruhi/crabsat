@@ -353,6 +353,8 @@ fn print_statistics(s: &Solver) {
         ("factor", st.time_factor),
         ("walk", st.time_walk),
         ("reduce", st.time_reduce),
+        ("stable mode", st.time_stable),
+        ("focused mode", st.time_focused),
     ] {
         println!("c {:<22} {:>14.2} seconds {:5.1}%", format!("time {name}"), v, 100.0 * v / t);
     }

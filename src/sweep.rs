@@ -30,6 +30,9 @@ impl Solver {
         if !self.opts.sweep || self.inconsistent {
             return !self.inconsistent;
         }
+        if self.delay_sweep.delaying() {
+            return true;
+        }
         self.stats.sweeps += 1;
         let limit = self.stats.sweep_ticks
             + self.effort_limit_from(self.last_probe_ticks, self.opts.sweepeffort);
@@ -91,6 +94,13 @@ impl Solver {
                 self.stats.sweep_units - before_units,
                 self.stats.sweep_equivalences - before_equivalences
             );
+        }
+        if self.stats.sweep_units == before_units
+            && self.stats.sweep_equivalences == before_equivalences
+        {
+            self.delay_sweep.bump();
+        } else {
+            self.delay_sweep.reduce();
         }
         if self.inconsistent {
             return false;

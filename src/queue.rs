@@ -123,6 +123,19 @@ impl Queue {
         self.first = idx;
     }
 
+    /// Rebuild the queue with the variables in the given order (the last
+    /// one is the first decision candidate).
+    pub fn rebuild(&mut self, order: &[Var]) {
+        self.first = DISCONNECT;
+        self.last = DISCONNECT;
+        self.stamp = 0;
+        self.search_idx = DISCONNECT;
+        for &v in order {
+            self.enqueue_links(v);
+        }
+        self.reset_search();
+    }
+
     /// Remove a variable from the queue (eliminated / fixed).
     pub fn dequeue(&mut self, idx: Var) {
         if self.search_idx == idx {

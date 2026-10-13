@@ -187,7 +187,11 @@ pub struct Solver {
     pub tier1: [u32; 2],
     pub tier2: [u32; 2],
     pub delay_bumpreasons: Delay,
+    pub delay_congruence: Delay,
+    pub delay_sweep: Delay,
+    pub delay_vivifyirr: Delay,
     pub mode_ticks: u64,
+    pub mode_start: f64,
 
     // Analysis scratch space.
     pub clause: Vec<Lit>,
@@ -212,6 +216,9 @@ pub struct Solver {
     pub imported: usize,
     pub replay: Option<Vec<(u64, u64, Vec<Lit>)>>,
     pub root_log: Option<Vec<Lit>>,
+    /// Variables in order of their first occurrence in added clauses.
+    pub first_seen: Vec<Var>,
+    pub seen: Vec<bool>,
 }
 
 impl Solver {
@@ -262,7 +269,11 @@ impl Solver {
             tier1: [0; 2],
             tier2: [0; 2],
             delay_bumpreasons: Delay::default(),
+            delay_congruence: Delay::default(),
+            delay_sweep: Delay::default(),
+            delay_vivifyirr: Delay::default(),
             mode_ticks: 0,
+            mode_start: 0.0,
             clause: Vec::new(),
             levels: Vec::new(),
             analyzed: Vec::new(),
@@ -284,6 +295,8 @@ impl Solver {
             imported: 0,
             replay: None,
             root_log: std::env::var_os("CRABSAT_CHECK_DB").map(|_| Vec::new()),
+            first_seen: Vec::new(),
+            seen: Vec::new(),
         };
         s.last_learned = vec![INVALID_REF; s.opts.eagersubsume as usize];
         s.random = s.opts.seed;
@@ -341,6 +354,22 @@ impl Solver {
 
     pub fn assigned_count(&self) -> u32 {
         self.vars as u32 - self.unassigned
+    }
+
+    /// After variables were eliminated, recount the trail heights of the
+    /// target and best phases over active variables (Kissat `compact.c`).
+    pub fn recount_phase_heights(&mut self) {
+        let mut target = 0;
+        let mut best = 0;
+        for v in 0..self.vars {
+            if self.flags[v] & ELIMINATED != 0 {
+                continue;
+            }
+            target += (self.phases.target[v] != 0) as u32;
+            best += (self.phases.best[v] != 0) as u32;
+        }
+        self.target_assigned = target;
+        self.best_assigned = best;
     }
 
     /// Assign `lit` (slow path, outside of propagation).
@@ -581,6 +610,15 @@ impl Solver {
         assert_eq!(self.level, 0, "clauses can only be added at the root level");
         if let Some(max) = lits.iter().map(|l| l.vidx()).max() {
             self.reserve_vars(max + 1);
+        }
+        if self.seen.len() < self.vars {
+            self.seen.resize(self.vars, false);
+        }
+        for &l in lits {
+            if !self.seen[l.vidx()] {
+                self.seen[l.vidx()] = true;
+                self.first_seen.push(l.var());
+            }
         }
         if self.inconsistent {
             return;
