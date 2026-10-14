@@ -281,3 +281,22 @@ the machine was under different load.)
 Same answers on the 87 instances solved by both; there crabsat is faster on
 41 and Kissat on 46 (geometric mean runtime ratio crabsat/Kissat 0.93 for
 instances above 1 s, total time 950 s vs 771 s).
+
+### 2026-10-15: Exact conflict limit
+
+- `Solver::set_conflict_limit` is an exact per-call bound: the limit is
+  checked after every conflict analysis (a chain of conflicts used to run
+  past it), and on-the-fly strengthening is not started once it is reached.
+  A call stopped by the limit has counted exactly the limit.  Without a
+  limit the search is unchanged.
+
+| union, 162 instances / 60 s, run simultaneously | solved | SAT | UNSAT | PAR-2 |
+|---|---|---|---|---|
+| 0.1.1 | 104 | 54 | 50 | 8292 |
+| 0.1.2 | 103 | 53 | 50 | 8357 |
+
+Identical answers, conflicts and decisions on the 103 instances solved by
+both; the difference is one instance at 59.6 s, which either version solves
+or misses from run to run.  Runtime ratio 0.1.2/0.1.1: geometric mean 1.006
+(instances above 1 s); 0.987 over 35 runs of seven instances started in
+pairs on two idle physical cores, alternating cores.

@@ -127,6 +127,95 @@ fn limits_are_per_call() {
     assert_eq!(s.solve(), SolveResult::Unsat);
 }
 
+/// Every call stops at or before its conflict limit, and exactly at it when
+/// the limit stops the call, also over chains of conflicts and on-the-fly
+/// strengthening.  Calls with small limits under changing assumptions
+/// resume the same search and agree with an unlimited solver.
+#[test]
+fn conflict_limit_is_exact() {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for instance in 0..40 {
+        let vars = 60;
+        let clauses: Vec<Vec<i32>> = (0..255)
+            .map(|_| {
+                (0..3)
+                    .map(|_| {
+                        let v = (next() % vars) as i32 + 1;
+                        if next() & 1 == 0 { v } else { -v }
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut limited = Solver::new(Options::default());
+        if instance % 2 == 0 {
+            pigeon_hole(&mut limited, 5);
+        }
+        for c in &clauses {
+            limited.add_clause(c);
+        }
+        let mut reference = Solver::new(Options::default());
+        if instance % 2 == 0 {
+            pigeon_hole(&mut reference, 5);
+        }
+        for c in &clauses {
+            reference.add_clause(c);
+        }
+        for query in 0..20 {
+            let assumptions: Vec<i32> = (0..query % 4)
+                .map(|_| {
+                    let v = (next() % vars) as i32 + 1;
+                    if next() & 1 == 0 { v } else { -v }
+                })
+                .collect();
+            // A limit of zero makes no progress, so it is checked alone.
+            for &a in &assumptions {
+                limited.assume(a);
+            }
+            limited.set_conflict_limit(Some(0));
+            let before = limited.stats().conflicts;
+            let answer = limited.solve();
+            let spent = limited.stats().conflicts - before;
+            assert!(
+                spent == 0 || (spent == 1 && answer == SolveResult::Unsat),
+                "instance {instance} query {query}"
+            );
+            let limit = 1 + next() % 8;
+            let answer = loop {
+                for &a in &assumptions {
+                    limited.assume(a);
+                }
+                limited.set_conflict_limit(Some(limit));
+                let before = limited.stats().conflicts;
+                let answer = limited.solve();
+                let spent = limited.stats().conflicts - before;
+                match answer {
+                    SolveResult::Unknown => {
+                        assert_eq!(spent, limit, "instance {instance} query {query}")
+                    }
+                    _ => {
+                        assert!(spent <= limit, "instance {instance} query {query}");
+                        break answer;
+                    }
+                }
+            };
+            for &a in &assumptions {
+                reference.assume(a);
+            }
+            assert_eq!(
+                answer,
+                reference.solve(),
+                "instance {instance} query {query}"
+            );
+        }
+    }
+}
+
 #[test]
 fn forced_phases() {
     let mut s = Solver::new(Options {

@@ -279,6 +279,10 @@ impl Solver {
             }
         }
         let conflict_size = self.analysis.antecedent_size;
+        // A strengthened clause is a new conflict, so it is not produced
+        // once the conflict limit is reached.  The count cannot change
+        // before this call returns.
+        let otfs = self.opts.otfs && !self.conflict_limit_reached();
         let mut resolved = 0;
         let mut t = self.trail.len();
         let uip;
@@ -312,7 +316,7 @@ impl Solver {
             }
             unresolved -= 1;
             self.analysis.resolvent_size -= 1;
-            if self.opts.otfs
+            if otfs
                 && self.analysis.antecedent_size > 2
                 && self.analysis.resolvent_size < self.analysis.antecedent_size
             {

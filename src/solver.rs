@@ -811,8 +811,22 @@ impl Solver {
     }
 
     /// Limit the number of conflicts of each solve call (`None`: no limit).
+    ///
+    /// The limit is exact: a call that stops with
+    /// [`SolveResult::Unknown`] because of it has counted exactly `conflicts`
+    /// conflicts ([`Stats::conflicts`](crate::Stats::conflicts)), and no
+    /// call counts more.  The only exception is a limit of zero on a
+    /// formula whose clauses conflict at the root level, which counts that
+    /// single conflict and returns [`SolveResult::Unsat`].
     pub fn set_conflict_limit(&mut self, conflicts: Option<u64>) {
         self.limits.conflicts = conflicts;
+    }
+
+    /// Whether the conflict limit of the current call is reached.
+    pub(crate) fn conflict_limit_reached(&self) -> bool {
+        self.limits
+            .conflicts_end
+            .is_some_and(|l| self.stats.conflicts >= l)
     }
 
     /// Limit the number of decisions of each solve call (`None`: no limit).

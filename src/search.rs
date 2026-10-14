@@ -43,6 +43,11 @@ impl Solver {
                 if !self.analyze(conflict) {
                     break SolveResult::Unsat;
                 }
+                // Checked after every analysis so that a chain of conflicts
+                // cannot run past the limit.
+                if self.conflict_limit_reached() {
+                    break SolveResult::Unknown;
+                }
             } else if self.iterating {
                 self.iterating = false;
                 self.report('i');
@@ -148,9 +153,7 @@ impl Solver {
     }
 
     fn limit_hit(&self) -> bool {
-        self.limits
-            .conflicts_end
-            .is_some_and(|l| self.stats.conflicts >= l)
+        self.conflict_limit_reached()
             || self
                 .limits
                 .decisions_end
