@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.3 - 2026-11-02
+
+- Every call after the first starts by compacting when at least
+  `Options::compactlim` percent of the variables are fixed or eliminated.
+  Clause groups retracted through activation literals (a unit clause with
+  the negated activation literal) were removed only by inprocessing, which
+  is scheduled by conflicts, so a long sequence of short calls kept all of
+  them in memory.  The first call, and so the command line solver, is
+  unchanged.
+
 ## 0.1.2 - 2026-10-15
 
 - `Solver::set_conflict_limit` is exact: a call never counts more

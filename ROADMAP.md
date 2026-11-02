@@ -300,3 +300,16 @@ both; the difference is one instance at 59.6 s, which either version solves
 or misses from run to run.  Runtime ratio 0.1.2/0.1.1: geometric mean 1.006
 (instances above 1 s); 0.987 over 35 runs of seven instances started in
 pairs on two idle physical cores, alternating cores.
+
+### 2026-11-02: Compaction between calls
+
+- A call after the first starts by compacting when `compactlim` percent of
+  the variables are fixed or eliminated, the limit inprocessing uses.  A
+  clause group retracted through an activation literal is satisfied by the
+  unit clause that retires it, but only compaction or a reduction removes
+  it, and both are scheduled by conflicts: an application making many short
+  calls, each adding and retiring a group, kept most of its groups.  In
+  `retired_clause_groups_are_collected` (300 calls, each adding and
+  retiring 24 guarded large clauses) at most 44 large clauses are kept at
+  once, against 500 before.
+- The first call is unchanged, and so is the command line solver.

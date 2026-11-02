@@ -288,3 +288,100 @@ fn zero_literal_is_rejected() {
     let mut s = Solver::new(Options::default());
     s.assume(0);
 }
+
+/// Adds `out = left & right` (DIMACS literals), with `extra` in every clause.
+fn and_gate(s: &mut Solver, gate: (i32, i32, i32), extra: Option<i32>) {
+    let (out, left, right) = gate;
+    for mut clause in [
+        vec![-out, left],
+        vec![-out, right],
+        vec![out, -left, -right],
+    ] {
+        clause.extend(extra);
+        s.add_clause(&clause);
+    }
+}
+
+/// Whether `lit` holds when the inputs `1..=inputs` take the bits of `bits`
+/// and every gate holds.
+fn holds(gates: &[(i32, i32, i32)], inputs: i32, bits: u32, lit: i32) -> bool {
+    let mut values = vec![false; gates.last().map_or(inputs, |g| g.0) as usize + 1];
+    for v in 1..=inputs {
+        values[v as usize] = bits >> (v - 1) & 1 == 1;
+    }
+    let value = |values: &[bool], l: i32| values[l.unsigned_abs() as usize] == (l > 0);
+    for &(out, left, right) in gates {
+        values[out as usize] = value(&values, left) && value(&values, right);
+    }
+    value(&values, lit)
+}
+
+/// Clause groups guarded by an activation literal and retired by its
+/// negation as a unit (the usual way to retract clauses) do not accumulate
+/// over many short calls, which never reach the conflicts that schedule
+/// inprocessing, and every answer is that of the remaining formula.
+#[test]
+fn retired_clause_groups_are_collected() {
+    const INPUTS: i32 = 10;
+    const ROUNDS: usize = 300;
+    const GROUP: usize = 8;
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut operand = |vars: i32| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let v = ((state >> 1) % vars as u64) as i32 + 1;
+        if state & 1 == 0 { v } else { -v }
+    };
+    let mut s = Solver::new(Options::default());
+    let mut gates: Vec<(i32, i32, i32)> = Vec::new();
+    let mut vars = INPUTS;
+    for _ in 0..40 {
+        let gate = (vars + 1, operand(vars), operand(vars));
+        vars += 1;
+        and_gate(&mut s, gate, None);
+        gates.push(gate);
+    }
+    let persistent = gates.len();
+    let (mut sat, mut unsat, mut most) = (0, 0, 0);
+    for _ in 0..ROUNDS {
+        vars += 1;
+        let guard = vars;
+        for _ in 0..GROUP {
+            let gate = (vars + 1, operand(vars - 1), operand(vars - 1));
+            vars += 1;
+            and_gate(&mut s, gate, Some(-guard));
+            gates.push(gate);
+        }
+        s.assume(guard);
+        s.assume(vars);
+        let expected = (0..1u32 << INPUTS).any(|bits| holds(&gates, INPUTS, bits, vars));
+        match s.solve() {
+            SolveResult::Sat => {
+                let bits = (1..=INPUTS)
+                    .filter(|&v| s.val(v) == v)
+                    .fold(0, |bits, v| bits | 1 << (v - 1));
+                assert!(holds(&gates, INPUTS, bits, vars));
+                sat += 1;
+            }
+            SolveResult::Unsat => {
+                assert!(!expected);
+                unsat += 1;
+            }
+            SolveResult::Unknown => unreachable!(),
+        }
+        s.add_clause(&[-guard]);
+        for &(out, _, _) in &gates[persistent..] {
+            s.add_clause(&[-out]);
+        }
+        gates.truncate(persistent);
+        most = most.max(s.stats().clauses_irredundant);
+    }
+    assert!(
+        sat > 0 && unsat > 0,
+        "{sat} satisfiable, {unsat} unsatisfiable"
+    );
+    // Each round retires 3 * GROUP large clauses, 7200 in all.
+    assert!(most < 200, "{most} irredundant large clauses");
+    assert!(s.stats().compacts > 0);
+}

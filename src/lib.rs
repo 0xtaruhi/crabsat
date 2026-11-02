@@ -34,6 +34,15 @@
 //! variable addition and saves memory; adding clauses with eliminated
 //! variables after solving then panics.
 //!
+//! Clauses are never removed, but a group of them can be retracted with an
+//! activation literal: add the negation of a fresh variable to each clause
+//! of the group, assume the variable while the group should hold, and add
+//! its negation as a unit clause to retire the group.  Every call after the
+//! first starts by compacting once [`Options::compactlim`] percent of the
+//! variables are fixed or eliminated, as inprocessing does, so retired
+//! clauses and their fixed variables are removed even when the calls are
+//! too short to reach inprocessing.
+//!
 //! # Callbacks
 //!
 //! [`Solver::solve_with`] takes a [`Callbacks`] implementation for

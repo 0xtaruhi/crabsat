@@ -16,6 +16,15 @@ impl Solver {
             self.mark_inconsistent();
             return SolveResult::Unsat;
         }
+        // Units added between calls, such as the negated activation literals
+        // that retire guarded clause groups, satisfy clauses and fix
+        // variables that only compaction removes.  Inprocessing compacts on
+        // its conflict schedule, which a sequence of short calls never
+        // reaches, so a later call also starts by compacting under the same
+        // limit.  The first call is left to preprocessing as before.
+        if self.presolved && self.compacting() && !self.compact() {
+            return SolveResult::Unsat;
+        }
         if let Some(res) = self.presolve() {
             return res;
         }
